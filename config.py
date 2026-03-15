@@ -33,19 +33,21 @@ MAX_BET_PCT    = 0.05       # Max 5% of bankroll per trade
 KELLY_FRACTION = 0.25       # Quarter Kelly
 
 # ── Shared signal thresholds ───────────────────────────────────────────────────
-MIN_ODDS           = 0.30
-MAX_ODDS           = 0.70
-MIN_BOOK_DEPTH     = 50.0
-NO_ENTRY_LAST_SECS = 60
+# Loosened for paper testing — capture all signal conditions for analysis
+# Tighten back to production values after 7-day data review
+MIN_ODDS           = 0.05    # prod: 0.30
+MAX_ODDS           = 0.95    # prod: 0.70
+MIN_BOOK_DEPTH     = 0.0     # prod: 50.0
+NO_ENTRY_LAST_SECS = 0       # prod: 60
 WINDOW_DURATION    = 300
 
 # ── Bot A thresholds (Chainlink lag only) ──────────────────────────────────────
-BOT_A_MIN_DEVIATION    = 0.45
-BOT_A_MIN_SUSTAIN_SECS = 10
-BOT_A_MIN_CONFIDENCE   = 0.50
+BOT_A_MIN_DEVIATION    = 0.10   # prod: 0.45
+BOT_A_MIN_SUSTAIN_SECS = 2      # prod: 10
+BOT_A_MIN_CONFIDENCE   = 0.10   # prod: 0.50
 
 # ── Bot B thresholds (Hybrid) ──────────────────────────────────────────────────
-BOT_B_MIN_CONFIDENCE = 0.62
+BOT_B_MIN_CONFIDENCE = 0.10   # prod: 0.62
 BOT_B_SIGNAL_WEIGHTS = {
     "momentum":      0.40,
     "rsi":           0.24,
