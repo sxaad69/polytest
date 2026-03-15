@@ -100,22 +100,44 @@ asyncio.run(test_chainlink())
 
 
 # ── 3. Binance WebSocket ───────────────────────────────────────────────────────
-header("3. Binance WebSocket")
+header("3. Price WebSocket (Coinbase primary / Binance fallback)")
 
 async def test_binance():
     import websockets
+    # Try Coinbase first (works on AWS)
     try:
-        async with websockets.connect(
-            "wss://stream.binance.com:9443/ws/btcusdt@trade"
-        ) as ws:
-            raw   = await asyncio.wait_for(ws.recv(), timeout=5)
-            msg   = json.loads(raw)
-            price = float(msg["p"])
-            record("Binance WS", True, f"BTC/USDT=${price:,.2f} live")
-    except asyncio.TimeoutError:
-        record("Binance WS", False, "connected but no trade in 5s")
+        async with websockets.connect("wss://advanced-trade-ws.coinbase.com/ws") as ws:
+            await ws.send(json.dumps({
+                "type": "subscribe",
+                "product_ids": ["BTC-USD"],
+                "channel": "ticker",
+            }))
+            for _ in range(5):   # wait up to 5 messages for a ticker
+                raw = await asyncio.wait_for(ws.recv(), timeout=5)
+                msg = json.loads(raw)
+                for event in msg.get("events", []):
+                    for ticker in event.get("tickers", []):
+                        price = float(ticker.get("price", 0))
+                        if price > 0:
+                            record("Price feed (Coinbase)", True,
+                                   f"BTC-USD=${price:,.2f} live")
+                            return
+        record("Price feed (Coinbase)", False, "connected but no price received")
     except Exception as e:
-        record("Binance WS", False, str(e))
+        warn(f"Coinbase failed ({e}) — trying Binance fallback")
+        try:
+            async with websockets.connect(
+                "wss://stream.binance.com:9443/ws/btcusdt@trade"
+            ) as ws:
+                raw   = await asyncio.wait_for(ws.recv(), timeout=5)
+                msg   = json.loads(raw)
+                price = float(msg["p"])
+                record("Price feed (Binance fallback)", True,
+                       f"BTC/USDT=${price:,.2f} live")
+        except Exception as e2:
+            record("Price feed", False,
+                   f"Both Coinbase and Binance failed. "
+                   f"Coinbase: {e} | Binance: {e2}")
 
 asyncio.run(test_binance())
 
