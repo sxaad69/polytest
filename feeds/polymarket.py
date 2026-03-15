@@ -77,9 +77,16 @@ class PolymarketFeed:
                 self.window_start = win_start
                 self.window_end   = win_end
 
-                # clobTokenIds is in the market response directly — no extra fetch needed
+                # clobTokenIds can be a list or a JSON-encoded string
                 clob_ids = m.get("clobTokenIds", [])
-                outcomes = m.get("outcomes", [])   # e.g. ["Up", "Down"] or ["Yes", "No"]
+                if isinstance(clob_ids, str):
+                    import json as _json
+                    try:
+                        clob_ids = _json.loads(clob_ids)
+                    except Exception:
+                        clob_ids = []
+
+                outcomes = m.get("outcomes", [])
 
                 if clob_ids and len(clob_ids) >= 2:
                     # Match token IDs to outcomes by index
