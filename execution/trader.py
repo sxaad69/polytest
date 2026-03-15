@@ -68,14 +68,15 @@ class ExecutionLayer:
 
         filled   = order.get("filled_price", entry_odds)
         trade_id = self.db.log_entry({
-            "signal_id":    signal_id,
-            "ts_entry":     datetime.utcnow().isoformat(),
-            "market_id":    self.poly.market_id,
-            "window_start": datetime.fromtimestamp(self.poly.window_start).isoformat(),
-            "window_end":   datetime.fromtimestamp(self.poly.window_end).isoformat(),
-            "direction":    direction,
-            "entry_odds":   filled,
-            "stake_usdc":   stake,
+            "signal_id":      signal_id,
+            "ts_entry":       datetime.utcnow().isoformat(),
+            "market_id":      self.poly.market_id,
+            "window_start":   datetime.fromtimestamp(self.poly.window_start).isoformat(),
+            "window_end":     datetime.fromtimestamp(self.poly.window_end).isoformat(),
+            "direction":      direction,
+            "entry_odds":     filled,
+            "stake_usdc":     stake,
+            "taker_fee_bps":  self.poly.taker_fee_bps,
             "chainlink_open": None,
         })
 

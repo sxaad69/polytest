@@ -49,7 +49,9 @@ CREATE TABLE IF NOT EXISTS trades (
     exit_odds       REAL,
     peak_odds       REAL,
     stake_usdc      REAL NOT NULL,
+    taker_fee_bps   INTEGER DEFAULT 0,
     pnl_usdc        REAL,
+    pnl_gross       REAL,
     outcome         TEXT,
     exit_reason     TEXT,
     chainlink_open  REAL,
@@ -162,32 +164,47 @@ class Database:
                 INSERT INTO trades (
                     signal_id, bot, ts_entry, market_id,
                     window_start, window_end, direction,
-                    entry_odds, peak_odds, stake_usdc, chainlink_open
+                    entry_odds, peak_odds, stake_usdc,
+                    taker_fee_bps, chainlink_open
                 ) VALUES (
                     :signal_id, :bot, :ts_entry, :market_id,
                     :window_start, :window_end, :direction,
-                    :entry_odds, :entry_odds, :stake_usdc, :chainlink_open
+                    :entry_odds, :entry_odds, :stake_usdc,
+                    :taker_fee_bps, :chainlink_open
                 )
-            """, {**t, "bot": self.bot_id})
+            """, {**t, "bot": self.bot_id,
+                  "taker_fee_bps": t.get("taker_fee_bps", 0)})
             return cur.lastrowid
 
     def log_exit(self, trade_id: int, e: dict) -> tuple:
-        pnl     = self._calc_pnl(e["entry_odds"], e["exit_odds"], e["stake_usdc"])
-        outcome = "win" if pnl > 0 else ("loss" if pnl < 0 else "breakeven")
+        # Fetch fee rate stored at entry time
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT taker_fee_bps FROM trades WHERE id=?", (trade_id,)
+            ).fetchone()
+        fee_bps = dict(row).get("taker_fee_bps", 0) if row else 0
+
+        # Gross PnL (no fees) and net PnL (after fees)
+        gross_pnl = self._calc_pnl(e["entry_odds"], e["exit_odds"], e["stake_usdc"], 0)
+        net_pnl   = self._calc_pnl(e["entry_odds"], e["exit_odds"], e["stake_usdc"], fee_bps)
+        outcome   = "win" if net_pnl > 0 else ("loss" if net_pnl < 0 else "breakeven")
+
         with self._conn() as conn:
             conn.execute("""
                 UPDATE trades SET
                     ts_exit         = :ts_exit,
                     exit_odds       = :exit_odds,
                     peak_odds       = :peak_odds,
-                    pnl_usdc        = :pnl,
+                    pnl_usdc        = :net_pnl,
+                    pnl_gross       = :gross_pnl,
                     outcome         = :outcome,
                     exit_reason     = :exit_reason,
                     chainlink_close = :chainlink_close,
                     resolved        = 1
                 WHERE id = :trade_id
-            """, {**e, "pnl": pnl, "outcome": outcome, "trade_id": trade_id})
-        return pnl, outcome
+            """, {**e, "net_pnl": net_pnl, "gross_pnl": gross_pnl,
+                  "outcome": outcome, "trade_id": trade_id})
+        return net_pnl, outcome
 
     def update_peak(self, trade_id: int, peak: float):
         with self._conn() as conn:
@@ -320,8 +337,32 @@ class Database:
         return r
 
     @staticmethod
-    def _calc_pnl(entry: float, exit_: float, stake: float) -> float:
+    def _calc_pnl(entry: float, exit_: float, stake: float,
+                  taker_fee_bps: int = 0) -> float:
+        """
+        Polymarket PnL with taker fees applied on both legs.
+
+        Entry: you buy N shares at entry_odds
+               fee = stake * (taker_fee_bps / 10000)
+               total cost = stake + entry_fee
+
+        Exit: you sell N shares at exit_odds
+              gross proceeds = N * exit_odds
+              fee = gross_proceeds * (taker_fee_bps / 10000)
+              net proceeds = gross_proceeds - exit_fee
+
+        PnL = net_proceeds - total_cost
+        """
         if not entry or not exit_:
             return 0.0
-        n = stake / entry
-        return round(n * exit_ - stake, 6)
+
+        fee_rate     = taker_fee_bps / 10000
+        n_shares     = stake / entry
+
+        entry_fee    = stake * fee_rate
+        gross_exit   = n_shares * exit_
+        exit_fee     = gross_exit * fee_rate
+        net_exit     = gross_exit - exit_fee
+        total_cost   = stake + entry_fee
+
+        return round(net_exit - total_cost, 6)

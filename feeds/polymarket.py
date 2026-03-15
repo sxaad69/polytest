@@ -33,16 +33,18 @@ WINDOW_SECONDS = 300   # 5-minute windows
 class PolymarketFeed:
 
     def __init__(self):
-        self.market_id: str       = None
-        self.condition_id: str    = None
-        self.window_start: float  = None
-        self.window_end: float    = None
-        self.up_token_id: str     = None
-        self.down_token_id: str   = None
-        self.up_odds: float       = None
-        self.down_odds: float     = None
-        self.book_depth: float    = 0.0
-        self.odds_velocity: float = 0.0
+        self.market_id       = None
+        self.condition_id    = None
+        self.window_start    = None
+        self.window_end      = None
+        self.up_token_id     = None
+        self.down_token_id   = None
+        self.up_odds         = None
+        self.down_odds       = None
+        self.book_depth      = 0.0
+        self.odds_velocity   = 0.0
+        self.taker_fee_bps   = 0     # fetched per market, in basis points
+        self.maker_fee_bps   = 0
         self._odds_history        = deque(maxlen=60)
         self._running             = False
         self._session             = None
@@ -102,10 +104,16 @@ class PolymarketFeed:
                         self.up_token_id   = clob_ids[0]
                         self.down_token_id = clob_ids[1]
 
-                logger.info("Market found | slug=%s ends_in=%.0fs | up=%s... down=%s...",
+                # Extract fee rates (in basis points) — vary by market
+                # takerBaseFee is the fee YOU pay as a taker (market order)
+                self.taker_fee_bps = int(m.get("takerBaseFee") or 0)
+                self.maker_fee_bps = int(m.get("makerBaseFee") or 0)
+
+                logger.info("Market found | slug=%s ends_in=%.0fs | up=%s... down=%s... | taker_fee=%dbps",
                             slug, win_end - now,
                             (self.up_token_id or "?")[:10],
-                            (self.down_token_id or "?")[:10])
+                            (self.down_token_id or "?")[:10],
+                            self.taker_fee_bps)
 
                 # Subscribe WS to new tokens immediately
                 await self.resubscribe()
@@ -182,6 +190,39 @@ class PolymarketFeed:
         }))
         logger.info("WS subscribed | up=%s... down=%s...",
                     self.up_token_id[:10], self.down_token_id[:10])
+        # Seed initial odds via REST — WS only pushes on change
+        # so if market just opened we'd wait indefinitely for first push
+        await self._seed_odds()
+
+    async def _seed_odds(self):
+        """Fetch current odds via REST to seed initial state."""
+        try:
+            for token_id, which in [
+                (self.up_token_id, "up"),
+                (self.down_token_id, "down"),
+            ]:
+                if not token_id:
+                    continue
+                async with self._session.get(
+                    f"{POLYMARKET_CLOB_URL}/midpoint",
+                    params={"token_id": token_id},
+                    timeout=aiohttp.ClientTimeout(total=5)
+                ) as resp:
+                    d = await resp.json()
+                mid = float(d.get("mid", 0))
+                if mid > 0:
+                    if which == "up":
+                        self.up_odds   = mid
+                        self.down_odds = round(1.0 - mid, 4)
+                    else:
+                        self.down_odds = mid
+                        self.up_odds   = round(1.0 - mid, 4)
+                    self._odds_history.append((time.time(), self.up_odds or 0.5))
+            if self.up_odds:
+                logger.info("Odds seeded via REST | up=%.3f down=%.3f",
+                            self.up_odds, self.down_odds)
+        except Exception as e:
+            logger.debug("Odds seed error: %s", e)
 
     async def resubscribe(self):
         """
