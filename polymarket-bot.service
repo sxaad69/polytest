@@ -6,13 +6,13 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=ubuntu
-WorkingDirectory=/home/ubuntu/polymarket
-ExecStart=/home/ubuntu/polymarket/venv/bin/python main.py
+WorkingDirectory=/home/ubuntu/polytest
+ExecStart=/home/ubuntu/polytest/.venv/bin/python main.py
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
-EnvironmentFile=/home/ubuntu/polymarket/.env
+EnvironmentFile=/home/ubuntu/polytest/.env
 StartLimitIntervalSec=60
 StartLimitBurst=3
 

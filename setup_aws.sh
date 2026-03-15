@@ -5,7 +5,7 @@
 
 set -e
 
-PROJECT_DIR="/home/ubuntu/polymarket"
+PROJECT_DIR="/home/ubuntu/polytest"
 SERVICE_NAME="polymarket-bot"
 
 echo ""
@@ -20,8 +20,8 @@ sudo apt-get install -y python3 python3-pip python3-venv git
 # 2. Python venv
 echo "→ Creating virtual environment..."
 cd $PROJECT_DIR
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install --upgrade pip --quiet
 pip install -r requirements.txt --quiet
 echo "  Dependencies installed"
@@ -30,16 +30,16 @@ echo "  Dependencies installed"
 mkdir -p data
 echo "  data/ directory ready"
 
-# 4. .env file
+# 4. Check .env file
 if [ ! -f .env ]; then
     echo ""
-    echo "→ Creating .env file..."
+    echo "→ .env file not found — creating it..."
     echo "  Paste your Alchemy RPC URL and press Enter:"
     read -p "  ALCHEMY_RPC_URL=" ALCHEMY_URL
     echo "ALCHEMY_RPC_URL=$ALCHEMY_URL" > .env
     echo "  .env created"
 else
-    echo "→ .env already exists — skipping"
+    echo "→ .env found at $PROJECT_DIR/.env ✓"
 fi
 
 # 5. Run health check
@@ -69,10 +69,10 @@ echo ""
 echo "=== Setup complete ==="
 echo ""
 echo "Useful commands:"
-echo "  sudo journalctl -u $SERVICE_NAME -f          → live logs"
-echo "  sudo journalctl -u $SERVICE_NAME --since today → today's logs"
-echo "  sudo systemctl status $SERVICE_NAME           → is it running?"
-echo "  sudo systemctl stop $SERVICE_NAME             → stop"
-echo "  sudo systemctl restart $SERVICE_NAME          → restart"
-echo "  ./deploy.sh                                    → pull latest + restart"
+echo "  sudo journalctl -u $SERVICE_NAME -f                    → live logs"
+echo "  sudo journalctl -u $SERVICE_NAME --since today          → today's logs"
+echo "  sudo systemctl status $SERVICE_NAME                     → is it running?"
+echo "  sudo systemctl stop $SERVICE_NAME                       → stop"
+echo "  sudo systemctl restart $SERVICE_NAME                    → restart"
+echo "  ./deploy.sh                                             → pull latest + restart"
 echo ""

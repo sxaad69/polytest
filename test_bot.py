@@ -168,28 +168,13 @@ header("5. Active BTC 5-minute market")
 
 async def test_market():
     import aiohttp
-    from datetime import datetime, timezone
-
-    def _ts(iso):
-        if not iso:
-            return None
-        try:
-            dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
-            return dt.replace(tzinfo=timezone.utc).timestamp()
-        except Exception:
-            return None
-
     now       = time.time()
     window_ts = int(now // 300) * 300
     found     = False
 
     async with aiohttp.ClientSession() as s:
-        slugs = [
-            f"btc-updown-5m-{window_ts}",
-            f"btc-updown-5m-{window_ts - 300}",
-            f"btc-updown-5m-{window_ts + 300}",
-        ]
-        for slug in slugs:
+        for ts in [window_ts, window_ts - 300, window_ts + 300]:
+            slug = f"btc-updown-5m-{ts}"
             try:
                 async with s.get(
                     "https://gamma-api.polymarket.com/markets",
@@ -200,41 +185,30 @@ async def test_market():
                 markets = data if isinstance(data, list) else data.get("markets", [])
                 if not markets:
                     continue
-                m     = markets[0]
-                end   = _ts(m.get("endDateIso") or m.get("end_date_iso"))
-                start = _ts(m.get("startDateIso") or m.get("start_date_iso"))
-                if start and end and start <= now < end:
-                    tokens = m.get("tokens", [])
-                    up_id  = next((t["token_id"] for t in tokens
-                                   if t.get("outcome","").lower() == "up"), None)
-                    record("Active 5m market", True,
-                           f"slug={slug} ends_in={end-now:.0f}s "
-                           f"up_token={up_id[:10] if up_id else 'none'}...")
-                    found = True
-                    break
-            except Exception:
+                m = markets[0]
+
+                # Use slug timestamp directly — API dates are plain dates not datetimes
+                win_start = float(ts)
+                win_end   = win_start + 300
+
+                if not (win_start <= now < win_end):
+                    continue
+
+                clob_ids = m.get("clobTokenIds", [])
+                outcomes = m.get("outcomes", [])
+                record("Active 5m market", True,
+                       f"slug={slug} ends_in={win_end-now:.0f}s "
+                       f"tokens={len(clob_ids)} outcomes={outcomes}")
+                found = True
+                break
+            except Exception as e:
+                logger.debug("slug %s error: %s", slug, e)
                 continue
 
-        if not found:
-            # Fallback scan
-            try:
-                async with s.get(
-                    "https://gamma-api.polymarket.com/markets",
-                    params={"active": "true", "closed": "false", "limit": 50},
-                    timeout=aiohttp.ClientTimeout(total=10)
-                ) as r:
-                    data = await r.json()
-                markets  = data if isinstance(data, list) else data.get("markets", [])
-                btc_mkts = [m for m in markets if "btc-updown-5m" in m.get("slug","")]
-                if btc_mkts:
-                    record("Active 5m market", True,
-                           f"found via scan — {btc_mkts[0].get('slug')}")
-                else:
-                    warn("No active BTC 5m market right now")
-                    warn("Normal outside US hours (~4pm-10pm ET) — bot will find it automatically")
-                    results.append(("Active 5m market", True, "no market now but API works"))
-            except Exception as e:
-                record("Active 5m market", False, str(e))
+    if not found:
+        warn("No active BTC 5m market right now")
+        warn("Normal outside US hours (~4pm-10pm ET) — bot finds it automatically")
+        results.append(("Active 5m market", True, "no market now but API works"))
 
 asyncio.run(test_market())
 

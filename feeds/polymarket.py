@@ -46,6 +46,7 @@ class PolymarketFeed:
         self._odds_history        = deque(maxlen=60)
         self._running             = False
         self._session             = None
+        self._ws                  = None   # active WS connection for resubscribe
 
     # ── Market discovery ───────────────────────────────────────────────────────
 
@@ -98,6 +99,9 @@ class PolymarketFeed:
                             slug, win_end - now,
                             (self.up_token_id or "?")[:10],
                             (self.down_token_id or "?")[:10])
+
+                # Subscribe WS to new tokens immediately
+                await self.resubscribe()
                 return True
 
             logger.info("No active BTC 5m market right now — will retry in 10s")
@@ -152,16 +156,36 @@ class PolymarketFeed:
 
     async def _ws_connect(self):
         async with websockets.connect(POLY_WS_URL) as ws:
+            self._ws = ws
             logger.info("Polymarket WS connected")
+            # Subscribe immediately if we already have tokens
             if self.up_token_id and self.down_token_id:
-                await ws.send(json.dumps({
-                    "assets_ids": [self.up_token_id, self.down_token_id],
-                    "type":       "market",
-                }))
+                await self._subscribe(ws)
             async for raw in ws:
                 if not self._running:
                     break
                 self._handle(raw)
+        self._ws = None
+
+    async def _subscribe(self, ws):
+        """Subscribe to price updates for current market tokens."""
+        await ws.send(json.dumps({
+            "assets_ids": [self.up_token_id, self.down_token_id],
+            "type":       "market",
+        }))
+        logger.info("WS subscribed | up=%s... down=%s...",
+                    self.up_token_id[:10], self.down_token_id[:10])
+
+    async def resubscribe(self):
+        """
+        Called after fetch_market loads new tokens.
+        Sends a fresh subscription on the existing WS connection.
+        """
+        if self._ws and self.up_token_id and self.down_token_id:
+            try:
+                await self._subscribe(self._ws)
+            except Exception as e:
+                logger.warning("Resubscribe error: %s", e)
 
     def _handle(self, raw: str):
         try:

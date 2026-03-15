@@ -108,13 +108,25 @@ class BaseBot:
             len(self.executor._positions),
             self.bankroll.balance
         )
+        self._log.info(
+            "[Bot%s] strategy=%s",
+            self.BOT_ID,
+            "Chainlink lag only" if self.BOT_ID == "A" else "Hybrid momentum+lag"
+        )
 
     async def _tick(self):
-        if not self.poly.market_id or self.poly.seconds_remaining < 30:
+        # Fetch new market when none loaded or current window is expiring
+        if not self.poly.market_id or self.poly.seconds_remaining < 15:
+            self.poly.market_id    = None
+            self.poly.up_token_id  = None
+            self.poly.down_token_id = None
+            self.poly.up_odds      = None
+            self.poly.down_odds    = None
             await self.poly.fetch_market()
             return
 
-        if not self.binance.price or not self.poly.up_odds:
+        # Have market but no odds yet — wait, don't re-fetch
+        if not self.poly.up_odds:
             return
 
         token = (self.poly.up_token_id if (self.binance.momentum_30s or 0) >= 0
@@ -141,15 +153,16 @@ class BaseBot:
         signal_id = self._log_signal(result, trade_odds, passed, reason)
 
         if not passed or not result.tradeable:
-            self._log.debug("Filtered: %s | score=%.3f", reason, result.score)
+            self._log.debug("[Bot%s] skip | reason=%s score=%.3f",
+                            self.BOT_ID, reason, result.score)
             return
 
         stake = self.sizer.calculate(result.score, trade_odds, self.bankroll.available)
         if stake <= 0:
             return
 
-        self._log.info("SIGNAL | dir=%s score=%.3f odds=%.3f stake=%.2f",
-                       result.direction, result.score, trade_odds, stake)
+        self._log.info("[Bot%s] SIGNAL | dir=%s score=%.3f odds=%.3f stake=%.2f",
+                       self.BOT_ID, result.direction, result.score, trade_odds, stake)
 
         await self.executor.enter(result.direction, result.score, stake, signal_id)
 

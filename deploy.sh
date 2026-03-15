@@ -1,6 +1,6 @@
 #!/bin/bash
 # Pull latest from git and restart the bot service.
-# Run from the project directory on your AWS instance:
+# Run from /home/ubuntu/polytest on your AWS instance:
 #   ./deploy.sh
 
 set -e
@@ -12,7 +12,7 @@ echo "→ Pulling latest from git..."
 git pull
 
 echo "→ Installing any new dependencies..."
-source venv/bin/activate
+source .venv/bin/activate
 pip install -r requirements.txt --quiet
 
 echo "→ Restarting bot service..."
