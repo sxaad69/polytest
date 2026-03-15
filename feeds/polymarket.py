@@ -54,19 +54,20 @@ class PolymarketFeed:
             now       = time.time()
             window_ts = int(now // WINDOW_SECONDS) * WINDOW_SECONDS
 
-            # Try current and adjacent windows
+            # Try current and adjacent windows via direct slug lookup
+            # This works even on AWS US where restricted markets are
+            # filtered out of general active scans
             for ts in [window_ts, window_ts - WINDOW_SECONDS, window_ts + WINDOW_SECONDS]:
                 slug = f"btc-updown-5m-{ts}"
                 m    = await self._fetch_by_slug(slug)
                 if not m:
                     continue
 
-                # Extract window times from slug timestamp — NOT from startDateIso/endDateIso
-                # because the API returns those as plain dates (2026-03-15), not datetimes
+                # Window times come from the slug timestamp directly —
+                # startDateIso/endDateIso are plain dates (not datetimes)
                 win_start = float(ts)
                 win_end   = win_start + WINDOW_SECONDS
 
-                # Check if this window is currently active
                 if not (win_start <= now < win_end):
                     continue
 
@@ -75,11 +76,28 @@ class PolymarketFeed:
                 self.window_start = win_start
                 self.window_end   = win_end
 
-                logger.info("Market found | slug=%s ends_in=%.0fs",
-                            slug, win_end - now)
+                # clobTokenIds is in the market response directly — no extra fetch needed
+                clob_ids = m.get("clobTokenIds", [])
+                outcomes = m.get("outcomes", [])   # e.g. ["Up", "Down"] or ["Yes", "No"]
 
-                # Fetch token IDs from CLOB API using condition_id
-                await self._fetch_tokens()
+                if clob_ids and len(clob_ids) >= 2:
+                    # Match token IDs to outcomes by index
+                    for i, outcome in enumerate(outcomes):
+                        o = outcome.lower()
+                        if o in ("up", "yes") and i < len(clob_ids):
+                            self.up_token_id = clob_ids[i]
+                        elif o in ("down", "no") and i < len(clob_ids):
+                            self.down_token_id = clob_ids[i]
+
+                    # Fallback: if outcomes order unknown, just assign by index
+                    if not self.up_token_id and len(clob_ids) >= 2:
+                        self.up_token_id   = clob_ids[0]
+                        self.down_token_id = clob_ids[1]
+
+                logger.info("Market found | slug=%s ends_in=%.0fs | up=%s... down=%s...",
+                            slug, win_end - now,
+                            (self.up_token_id or "?")[:10],
+                            (self.down_token_id or "?")[:10])
                 return True
 
             logger.info("No active BTC 5m market right now — will retry in 10s")
@@ -103,38 +121,6 @@ class PolymarketFeed:
         except Exception as e:
             logger.debug("_fetch_by_slug(%s) error: %s", slug, e)
             return None
-
-    async def _fetch_tokens(self):
-        """
-        Fetch Up/Down token IDs from the CLOB API using condition_id.
-        CLOB endpoint: GET /markets/{condition_id}
-        """
-        if not self.condition_id:
-            logger.warning("No condition_id — cannot fetch tokens")
-            return
-        try:
-            async with self._session.get(
-                f"{POLYMARKET_CLOB_URL}/markets/{self.condition_id}",
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
-                data = await resp.json()
-
-            tokens = data.get("tokens", [])
-            for t in tokens:
-                outcome = t.get("outcome", "").lower()
-                if outcome == "up" or outcome == "yes":
-                    self.up_token_id = t["token_id"]
-                elif outcome == "down" or outcome == "no":
-                    self.down_token_id = t["token_id"]
-
-            if self.up_token_id and self.down_token_id:
-                logger.info("Tokens loaded | up=%s... down=%s...",
-                            self.up_token_id[:10], self.down_token_id[:10])
-            else:
-                logger.warning("Tokens not found in CLOB response: %s", data)
-
-        except Exception as e:
-            logger.warning("_fetch_tokens error: %s", e)
 
     # ── Order book ─────────────────────────────────────────────────────────────
 
