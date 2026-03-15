@@ -12,6 +12,7 @@ lib/
 lib64/
 parts/
 wheels/
+.env
 *.egg-info/
 
 # Unit test and coverage reports
