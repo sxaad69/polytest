@@ -48,8 +48,13 @@ class ExecutionLayer:
 
     async def enter(self, direction: str, confidence: float,
                     stake: float, signal_id: int):
-        token_id   = self.poly.up_token_id   if direction == "long" else self.poly.down_token_id
-        entry_odds = self.poly.up_odds        if direction == "long" else self.poly.down_odds
+        # Long = buy Up shares, Short = buy Down shares
+        if direction == "long":
+            token_id   = self.poly.up_token_id
+            entry_odds = self.poly.up_odds
+        else:
+            token_id   = self.poly.down_token_id
+            entry_odds = self.poly.down_odds
 
         if not entry_odds or not token_id:
             logger.warning("[Bot%s] No odds/token — skipping entry", self.bot_id)
@@ -107,12 +112,19 @@ class ExecutionLayer:
     async def _evaluate(self, trade_id: int, pos: dict):
         direction    = pos["direction"]
         secs_to_end  = pos["window_end"] - time.time()
-        current_odds = self.poly.up_odds if direction == "long" else self.poly.down_odds
+
+        # Track the odds for the direction we bet ON
+        # Long = we bought Up shares, want Up odds to rise
+        # Short = we bought Down shares, want Down odds to rise
+        if direction == "long":
+            current_odds = self.poly.up_odds
+        else:
+            current_odds = self.poly.down_odds
 
         if not current_odds:
             return
 
-        # Update peak
+        # Update peak — highest odds seen for our position direction
         if current_odds > pos["peak_odds"]:
             pos["peak_odds"] = current_odds
             self.db.update_peak(trade_id, current_odds)
@@ -122,7 +134,7 @@ class ExecutionLayer:
             await self._exit(trade_id, pos, current_odds, "hard_stop")
             return
 
-        # 2. Take profit
+        # 2. Take profit — our odds rose TAKE_PROFIT_DELTA above entry
         if current_odds >= pos["entry_odds"] + TAKE_PROFIT_DELTA:
             await self._exit(trade_id, pos, current_odds, "take_profit")
             return
