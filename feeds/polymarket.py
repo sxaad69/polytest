@@ -104,16 +104,19 @@ class PolymarketFeed:
                         self.up_token_id   = clob_ids[0]
                         self.down_token_id = clob_ids[1]
 
-                # Extract fee rates (in basis points) — vary by market
-                # takerBaseFee is the fee YOU pay as a taker (market order)
-                self.taker_fee_bps = int(m.get("takerBaseFee") or 0)
-                self.maker_fee_bps = int(m.get("makerBaseFee") or 0)
+                # takerBaseFee raw value is in hundredths of a basis point
+                # 1000 raw = 1000/100 = 10 bps = 0.10% per trade
+                # spread=0.01 confirms 1% total (entry + exit combined)
+                raw_taker           = int(m.get("takerBaseFee") or 0)
+                raw_maker           = int(m.get("makerBaseFee") or 0)
+                self.taker_fee_bps  = raw_taker // 100   # convert to real bps
+                self.maker_fee_bps  = raw_maker // 100
 
-                logger.info("Market found | slug=%s ends_in=%.0fs | up=%s... down=%s... | taker_fee=%dbps",
+                logger.info("Market found | slug=%s ends_in=%.0fs | up=%s... down=%s... | taker_fee=%.2f%%",
                             slug, win_end - now,
                             (self.up_token_id or "?")[:10],
                             (self.down_token_id or "?")[:10],
-                            self.taker_fee_bps)
+                            self.taker_fee_bps / 100)
 
                 # Subscribe WS to new tokens immediately
                 await self.resubscribe()
