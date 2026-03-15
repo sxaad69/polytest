@@ -87,7 +87,8 @@ def print_comparison(bot_a_balance: float = None, bot_b_balance: float = None):
     bal_b = bot_b_balance or BOT_B_BANKROLL
 
     def v(d, k, fmt="{}"):
-        val = d.get(k) or 0
+        val = d.get(k)
+        val = 0 if val is None else val
         try:
             return fmt.format(val)
         except Exception:
@@ -138,18 +139,25 @@ def _verdict(a: dict, b: dict):
     print("  " + "─" * 66)
     issues_a, issues_b = [], []
 
-    if (a.get("total") or 0) < 50:
-        issues_a.append(f"sample too small ({a.get('total',0)} trades, need 50+)")
-    if (b.get("total") or 0) < 50:
-        issues_b.append(f"sample too small ({b.get('total',0)} trades, need 50+)")
-    if (a.get("win_rate") or 0) < 52:
-        issues_a.append(f"win rate {a.get('win_rate',0):.1f}% below 52%")
-    if (b.get("win_rate") or 0) < 52:
-        issues_b.append(f"win rate {b.get('win_rate',0):.1f}% below 52%")
-    if (a.get("expectancy") or 0) < 0:
-        issues_a.append(f"negative expectancy ({a.get('expectancy',0):.5f})")
-    if (b.get("expectancy") or 0) < 0:
-        issues_b.append(f"negative expectancy ({b.get('expectancy',0):.5f})")
+    total_a  = a.get("total") or 0
+    total_b  = b.get("total") or 0
+    wr_a     = float(a.get("win_rate") or 0)
+    wr_b     = float(b.get("win_rate") or 0)
+    exp_a    = float(a.get("expectancy") or 0)
+    exp_b    = float(b.get("expectancy") or 0)
+
+    if total_a < 50:
+        issues_a.append(f"sample too small ({total_a} trades, need 50+)")
+    if total_b < 50:
+        issues_b.append(f"sample too small ({total_b} trades, need 50+)")
+    if wr_a < 52:
+        issues_a.append(f"win rate {wr_a:.1f}% below 52%")
+    if wr_b < 52:
+        issues_b.append(f"win rate {wr_b:.1f}% below 52%")
+    if exp_a < 0:
+        issues_a.append(f"negative expectancy ({exp_a:.5f})")
+    if exp_b < 0:
+        issues_b.append(f"negative expectancy ({exp_b:.5f})")
 
     def show(label, issues, exp, wr):
         if issues:
