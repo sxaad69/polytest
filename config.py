@@ -41,26 +41,27 @@ NO_ENTRY_LAST_SECS = 150     # key fix (was 0) — eliminates hard stops
 WINDOW_DURATION    = 300
 
 # ── Bot A thresholds (Chainlink lag) ───────────────────────────────────────────
-# v1 data showed edge only at 0.45-0.52% deviation band
-# Below 0.45% = noise (39% win rate)
-# Above 0.52% = crowd already priced in (35% win rate)
-# 0.45-0.50% band = 64.8% win rate, +$17.27
-BOT_A_MIN_DEVIATION    = 0.45   # restored (was 0.10)
-BOT_A_MIN_SUSTAIN_SECS = 10     # restored (was 2)
-BOT_A_MIN_CONFIDENCE   = 0.45   # slightly loosened from original 0.50
+# Widened deviation range to gather more data in paper mode
+# v2 showed 0.45-0.52% only fires ~1 trade per session — too narrow
+# Now accepting 0.20-0.60% to understand the full deviation picture
+# Analysis showed high dev signals appear late in window with crowd already priced in
+# Paper testing this wider range will confirm or deny if there's edge at lower dev
+BOT_A_MIN_DEVIATION    = 0.20   # widened from 0.45 — gather data across all ranges
+BOT_A_MAX_DEVIATION    = 0.70   # widened from 0.52 — no upper cap in paper mode
+BOT_A_MIN_SUSTAIN_SECS = 5      # lowered from 10 — catch signals earlier
+BOT_A_MIN_CONFIDENCE   = 0.20   # lowered from 0.45 — paper mode, gather all data
 
 # ── Bot B thresholds (Hybrid) ──────────────────────────────────────────────────
-# v1 data: 67.8% win rate excluding hard stops, +$107.92
-# Confidence at 0.20 — moderate, not too tight yet
-BOT_B_MIN_CONFIDENCE = 0.20    # was 0.10 loose, was 0.62 original
+# Increased lag boost/dampen — deviation is a strong confirmation signal
+BOT_B_MIN_CONFIDENCE = 0.20
 BOT_B_SIGNAL_WEIGHTS = {
     "momentum":      0.40,
     "rsi":           0.24,
     "volume":        0.18,
     "odds_velocity": 0.18,
 }
-BOT_B_LAG_BOOST  = 0.15
-BOT_B_LAG_DAMPEN = 0.70
+BOT_B_LAG_BOOST  = 0.25   # was 0.15 — stronger reward when lag confirms direction
+BOT_B_LAG_DAMPEN = 0.60   # was 0.70 — stronger penalty when lag contradicts
 
 # ── Circuit breaker ────────────────────────────────────────────────────────────
 CIRCUIT_BREAKER_ENABLED = False   # paper mode — flip True for live
@@ -69,7 +70,7 @@ DAILY_LOSS_LIMIT_PCT    = 0.15
 
 # ── Position management ────────────────────────────────────────────────────────
 TAKE_PROFIT_DELTA   = 0.18   # unchanged — working well
-TRAILING_STOP_DELTA = 0.15   # widened from 0.10 — give winners more room
+TRAILING_STOP_DELTA = 0.20   # widened from 0.15 — survive larger reversals
 HARD_STOP_SECONDS   = 30     # unchanged
 POSITION_POLL_SECS  = 3
 

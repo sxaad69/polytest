@@ -1,0 +1,30 @@
+Must fix before $50 live
+1. Live order placement is not implemented
+feeds/polymarket.py → place_order() currently throws NotImplementedError when PAPER_TRADING=False. You need py-clob-client wired in with your wallet key. Without this the bot literally cannot place a real order.
+2. Position sizing is untested on live fills
+In paper mode every order fills at exactly the odds you see. On live Polymarket you may get partial fills or slightly worse prices. The Kelly sizer assumes perfect fills.
+3. No duplicate trade guard
+Both bots share the same Polymarket market. If both signal the same window simultaneously in live mode, you could accidentally enter two positions on the same market. The conflict resolver exists in code but was never tested.
+4. No wallet balance check
+Before live trading the bot should verify your Polymarket USDC balance is sufficient. Currently it just assumes bankroll is available.
+Should fix but not blocking
+5. Trading hours filter not implemented yet
+We identified the best hours from data but haven't wired it into the code. Running 24/7 live means burning real money in the bad hours (UTC 0-2, 15, 18, 23).
+6. Bot A max deviation cap at 0.52%
+Data showed above 0.52% the crowd has already priced it in. Not coded yet.
+7. comparison.py crash on empty db
+Still crashes on shutdown. Minor but annoying.
+Won't block you but worth knowing
+8. Slippage not modeled
+Your take profit at 0.18 delta assumes you sell at exactly that price. Real orders may execute 0.01-0.02 worse. On tight margins that matters.
+9. One market condition tested
+BTC was mostly trending down during v1 paper test. Haven't seen how bots behave on a flat day or sudden reversal.
+Priority order
+Before touching PAPER_TRADING=False:
+
+1. Implement live order placement (py-clob-client)
+2. Add wallet balance check
+3. Add duplicate trade guard
+4. Add trading hours filter (protect real money)
+
+Then flip to live with $50.

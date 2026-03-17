@@ -141,9 +141,10 @@ class ExecutionLayer:
             return
 
         # 3. Trailing stop — only activates after meaningful peak gain
+        # Requires 10¢ gain before trailing — prevents premature stop-outs
         peak_gain  = pos["peak_odds"] - pos["entry_odds"]
         stop_level = pos["peak_odds"] - TRAILING_STOP_DELTA
-        if peak_gain >= 0.05 and current_odds <= stop_level:
+        if peak_gain >= 0.10 and current_odds <= stop_level:
             await self._exit(trade_id, pos, current_odds, "trailing_stop")
             return
 
