@@ -15,7 +15,7 @@ import time
 import aiohttp
 from config import (
     CHAINLINK_RPC_URL, CHAINLINK_BTC_FEED,
-    BOT_A_MIN_DEVIATION, BOT_A_MIN_SUSTAIN_SECS,
+    BOT_A_MIN_DEVIATION, BOT_A_MAX_DEVIATION, BOT_A_MIN_SUSTAIN_SECS,
     CHAINLINK_POLL_SECS,
 )
 
@@ -130,7 +130,7 @@ class ChainlinkFeed:
         direction         = "up" if dev > 0 else "down"
         now               = time.time()
 
-        if abs(dev) >= BOT_A_MIN_DEVIATION:
+        if abs(dev) >= BOT_A_MIN_DEVIATION and abs(dev) <= BOT_A_MAX_DEVIATION:
             if self._dev_dir != direction:
                 self._dev_start = now
                 self._dev_dir   = direction

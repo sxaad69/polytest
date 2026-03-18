@@ -1,7 +1,12 @@
 """
 Execution Layer
-Trade entry, position monitor, trailing stop, take profit, hard stop.
-One instance per bot — each has its own db and bankroll.
+Trade entry, position monitor, take profit, hard stop.
+Trailing stop disabled — 0% win rate confirmed across all paper test versions.
+
+Changes from data analysis:
+  - HARD_STOP_SECONDS: 30 → 60  (earlier exit = better price on losses)
+  - TRAILING_STOP: disabled via TRAILING_STOP_ENABLED=False in config
+  - peak_gain threshold: 0.05 → 0.10 (kept for when trailing re-enabled)
 """
 
 import asyncio
@@ -9,7 +14,7 @@ import logging
 import time
 from datetime import datetime
 from config import (
-    TAKE_PROFIT_DELTA, TRAILING_STOP_DELTA,
+    TAKE_PROFIT_DELTA, TRAILING_STOP_DELTA, TRAILING_STOP_ENABLED,
     HARD_STOP_SECONDS, POSITION_POLL_SECS, PAPER_TRADING,
 )
 
@@ -46,6 +51,8 @@ class ExecutionLayer:
         self.starting_bankroll = starting_bankroll
         self._positions: dict  = {}
 
+    # ── Entry ──────────────────────────────────────────────────────────────────
+
     async def enter(self, direction: str, confidence: float,
                     stake: float, signal_id: int):
         # Long = buy Up shares, Short = buy Down shares
@@ -71,8 +78,10 @@ class ExecutionLayer:
             "signal_id":      signal_id,
             "ts_entry":       datetime.utcnow().isoformat(),
             "market_id":      self.poly.market_id,
-            "window_start":   datetime.fromtimestamp(self.poly.window_start).isoformat(),
-            "window_end":     datetime.fromtimestamp(self.poly.window_end).isoformat(),
+            "window_start":   datetime.fromtimestamp(
+                                  self.poly.window_start).isoformat(),
+            "window_end":     datetime.fromtimestamp(
+                                  self.poly.window_end).isoformat(),
             "direction":      direction,
             "entry_odds":     filled,
             "stake_usdc":     stake,
@@ -96,6 +105,8 @@ class ExecutionLayer:
                     trade_id, direction, filled, stake)
         return trade_id
 
+    # ── Position monitor ───────────────────────────────────────────────────────
+
     async def start_monitor(self):
         while True:
             if self._positions:
@@ -111,12 +122,12 @@ class ExecutionLayer:
             await self._evaluate(tid, pos)
 
     async def _evaluate(self, trade_id: int, pos: dict):
-        direction    = pos["direction"]
-        secs_to_end  = pos["window_end"] - time.time()
+        direction   = pos["direction"]
+        secs_to_end = pos["window_end"] - time.time()
 
-        # Track the odds for the direction we bet ON
-        # Long = we bought Up shares, want Up odds to rise
-        # Short = we bought Down shares, want Down odds to rise
+        # Track odds for the direction we bet ON
+        # Long = Up shares, want Up odds to rise
+        # Short = Down shares, want Down odds to rise
         if direction == "long":
             current_odds = self.poly.up_odds
         else:
@@ -125,33 +136,39 @@ class ExecutionLayer:
         if not current_odds:
             return
 
-        # Update peak — highest odds seen for our position direction
+        # Update peak odds
         if current_odds > pos["peak_odds"]:
             pos["peak_odds"] = current_odds
             self.db.update_peak(trade_id, current_odds)
 
-        # 1. Hard stop — always exit 30s before window closes
+        # ── 1. Hard stop — exit 60s before window closes ───────────────────
+        # At 60s exit price is still reasonable
+        # At 30s odds often already collapsed — worse fill
         if secs_to_end <= HARD_STOP_SECONDS:
             await self._exit(trade_id, pos, current_odds, "hard_stop")
             return
 
-        # 2. Take profit — our odds rose TAKE_PROFIT_DELTA above entry
+        # ── 2. Take profit ─────────────────────────────────────────────────
+        # Exit when odds rise TAKE_PROFIT_DELTA above entry
         if current_odds >= pos["entry_odds"] + TAKE_PROFIT_DELTA:
             await self._exit(trade_id, pos, current_odds, "take_profit")
             return
 
-        # 3. Trailing stop — only activates after meaningful peak gain
-        # Requires 10¢ gain before trailing — prevents premature stop-outs
-        peak_gain  = pos["peak_odds"] - pos["entry_odds"]
-        stop_level = pos["peak_odds"] - TRAILING_STOP_DELTA
-        if peak_gain >= 0.10 and current_odds <= stop_level:
-            await self._exit(trade_id, pos, current_odds, "trailing_stop")
-            return
+        # ── 3. Trailing stop (disabled by default) ─────────────────────────
+        # Data showed 0% win rate across all versions
+        # Re-enable via TRAILING_STOP_ENABLED=True in config if re-testing
+        if TRAILING_STOP_ENABLED:
+            peak_gain  = pos["peak_odds"] - pos["entry_odds"]
+            stop_level = pos["peak_odds"] - TRAILING_STOP_DELTA
+            if peak_gain >= 0.10 and current_odds <= stop_level:
+                await self._exit(trade_id, pos, current_odds, "trailing_stop")
+                return
 
     async def _exit(self, trade_id: int, pos: dict,
                     exit_odds: float, reason: str):
         await self.poly.place_order(
-            "sell", pos["token_id"], pos["stake_usdc"], exit_odds, self.bot_id
+            "sell", pos["token_id"],
+            pos["stake_usdc"], exit_odds, self.bot_id
         )
         pnl, outcome = self.db.log_exit(trade_id, {
             "ts_exit":        datetime.utcnow().isoformat(),
@@ -165,5 +182,7 @@ class ExecutionLayer:
         self.bankroll.settle(pos["stake_usdc"], pnl)
         self.cb.on_result(self.db, outcome, pnl, self.starting_bankroll)
         del self._positions[trade_id]
-        logger.info("[Bot%s] EXIT | id=%s reason=%s odds=%.3f pnl=%+.4f outcome=%s",
-                    self.bot_id, trade_id, reason, exit_odds, pnl, outcome)
+        logger.info(
+            "[Bot%s] EXIT | id=%s reason=%s odds=%.3f pnl=%+.4f outcome=%s",
+            self.bot_id, trade_id, reason, exit_odds, pnl, outcome
+        )

@@ -1,13 +1,19 @@
 """
-Polymarket Dual-Bot — Config v2
-Thresholds set from paper trading data analysis (v1 loose run).
+Polymarket Dual-Bot — Config v4
+All settings derived from paper trading data analysis.
 
-Key findings from v1 data:
-  - Hard stops are the main loss driver — NO_ENTRY_LAST_SECS=150 fixes this
-  - Bot A edge exists only at 0.45-0.52% deviation band
-  - Bot B profitable up to 0.65 odds, loses above that
-  - Trailing stop too tight at 0.10 — widened to 0.15
-  - Best trading hours UTC: 8,11,12,13,17,19 (added tomorrow after confirmation)
+Data summary (3000+ trades across v1/v2/v3):
+  ✓ Middle 3 minutes (60-240s elapsed) = 67-68% win rate
+  ✓ First 60s = unstable odds, avoid
+  ✓ Last 60s = odds decided, avoid
+  ✓ Trailing stop = 0% win rate across ALL versions — disabled
+  ✓ Hard stop at 30s too late — moved to 60s for better exit price
+  ✓ Take profit delta 0.18 too small — increased to 0.22
+  ✓ Bot A break-even = 48% (wide margin), Bot B break-even = 64% (tight)
+  ✓ Bot A payout ratio better: +$0.71 TP vs -$0.66 HS
+  ✓ Bot B needs TAKE_PROFIT_DELTA increase to improve payout ratio
+  ✓ Chainlink lag edge at 0.20-0.40% deviation (confirmed)
+  ✓ Above 0.40% = crowd already priced in
 """
 
 import os
@@ -20,8 +26,8 @@ load_dotenv()
 PAPER_TRADING = True        # flip to False when going live
 
 # ── Bot enable flags ───────────────────────────────────────────────────────────
-BOT_A_ENABLED = True
-BOT_B_ENABLED = True
+BOT_A_ENABLED = True        # Chainlink lag — profitable with filters
+BOT_B_ENABLED = True        # Hybrid — needs one more day to confirm
 
 # ── Live conflict rule ─────────────────────────────────────────────────────────
 LIVE_CONFLICT_RULE = "higher_confidence"
@@ -33,26 +39,23 @@ MAX_BET_PCT    = 0.05
 KELLY_FRACTION = 0.25
 
 # ── Shared signal thresholds ───────────────────────────────────────────────────
-# v1 loose → v2 data-driven
-MIN_ODDS           = 0.30    # restored (was 0.05)
-MAX_ODDS           = 0.65    # tightened (was 0.95) — 0.6+ bucket underperforms
-MIN_BOOK_DEPTH     = 50.0    # restored (was 0.0)
-NO_ENTRY_LAST_SECS = 150     # key fix (was 0) — eliminates hard stops
-WINDOW_DURATION    = 300
+MIN_ODDS            = 0.30
+MAX_ODDS            = 0.65
+MIN_BOOK_DEPTH      = 50.0
+NO_ENTRY_LAST_SECS  = 180   # don't enter if <180s remaining (data confirmed)
+NO_ENTRY_FIRST_SECS = 60    # don't enter in first 60s (odds not formed)
+WINDOW_DURATION     = 300
 
 # ── Bot A thresholds (Chainlink lag) ───────────────────────────────────────────
-# Widened deviation range to gather more data in paper mode
-# v2 showed 0.45-0.52% only fires ~1 trade per session — too narrow
-# Now accepting 0.20-0.60% to understand the full deviation picture
-# Analysis showed high dev signals appear late in window with crowd already priced in
-# Paper testing this wider range will confirm or deny if there's edge at lower dev
-BOT_A_MIN_DEVIATION    = 0.20   # widened from 0.45 — gather data across all ranges
-BOT_A_MAX_DEVIATION    = 0.70   # widened from 0.52 — no upper cap in paper mode
-BOT_A_MIN_SUSTAIN_SECS = 5      # lowered from 10 — catch signals earlier
-BOT_A_MIN_CONFIDENCE   = 0.20   # lowered from 0.45 — paper mode, gather all data
+# Data showed edge at 0.20-0.40% deviation band
+# Above 0.40% = crowd already priced in, win rate drops to 0%
+# Below 0.20% = noise, no directional signal
+BOT_A_MIN_DEVIATION    = 0.20   # confirmed lower bound
+BOT_A_MAX_DEVIATION    = 0.40   # confirmed upper bound — above this loses money
+BOT_A_MIN_SUSTAIN_SECS = 5      # fast trigger — catch signal early in window
+BOT_A_MIN_CONFIDENCE   = 0.20   # paper mode — gather data
 
 # ── Bot B thresholds (Hybrid) ──────────────────────────────────────────────────
-# Increased lag boost/dampen — deviation is a strong confirmation signal
 BOT_B_MIN_CONFIDENCE = 0.20
 BOT_B_SIGNAL_WEIGHTS = {
     "momentum":      0.40,
@@ -60,8 +63,8 @@ BOT_B_SIGNAL_WEIGHTS = {
     "volume":        0.18,
     "odds_velocity": 0.18,
 }
-BOT_B_LAG_BOOST  = 0.25   # was 0.15 — stronger reward when lag confirms direction
-BOT_B_LAG_DAMPEN = 0.60   # was 0.70 — stronger penalty when lag contradicts
+BOT_B_LAG_BOOST  = 0.25   # strong reward when lag confirms direction
+BOT_B_LAG_DAMPEN = 0.60   # strong penalty when lag contradicts
 
 # ── Circuit breaker ────────────────────────────────────────────────────────────
 CIRCUIT_BREAKER_ENABLED = False   # paper mode — flip True for live
@@ -69,19 +72,15 @@ MAX_CONSECUTIVE_LOSSES  = 5
 DAILY_LOSS_LIMIT_PCT    = 0.15
 
 # ── Position management ────────────────────────────────────────────────────────
-TAKE_PROFIT_DELTA   = 0.18   # unchanged — working well
-TRAILING_STOP_DELTA = 0.20   # widened from 0.15 — survive larger reversals
-HARD_STOP_SECONDS   = 30     # unchanged
-POSITION_POLL_SECS  = 3
-
-# ── TODO after tomorrow's data ─────────────────────────────────────────────────
-# Add trading hours filter if pattern confirms:
-# Best hours UTC: 8, 11, 12, 13, 17, 19
-# Avoid UTC: 0, 1, 2, 15, 18, 23
-# TRADING_HOURS_UTC = [8, 11, 12, 13, 17, 19]
-#
-# Add Bot A max deviation cap:
-# BOT_A_MAX_DEVIATION = 0.52  (above this, crowd already priced it in)
+# Data-driven changes:
+#   TAKE_PROFIT_DELTA: 0.18→0.22 — bigger wins improve payout ratio
+#   HARD_STOP_SECONDS: 30→60 — earlier exit = better odds price on losses
+#   TRAILING_STOP: disabled — 0% win rate confirmed across all versions
+TAKE_PROFIT_DELTA     = 0.22    # increased from 0.18 — lowers break-even to ~57%
+TRAILING_STOP_ENABLED = False   # disabled: 0% win rate in v1/v2/v3
+TRAILING_STOP_DELTA   = 0.20    # kept for reference only — not active
+HARD_STOP_SECONDS     = 60      # increased from 30 — better exit price
+POSITION_POLL_SECS    = 3
 
 # ── Chainlink ──────────────────────────────────────────────────────────────────
 CHAINLINK_RPC_URL   = os.getenv("ALCHEMY_RPC_URL", "")
@@ -103,7 +102,6 @@ POLYMARKET_API_SECRET     = os.getenv("POLYMARKET_API_SECRET", "")
 POLYMARKET_PASSPHRASE     = os.getenv("POLYMARKET_PASSPHRASE", "")
 
 # ── Database ───────────────────────────────────────────────────────────────────
-# v2 fresh databases — v1 data preserved as *_v1_loose.db
 _DATA_DIR = pathlib.Path(__file__).parent / "data"
 _DATA_DIR.mkdir(exist_ok=True)
 
@@ -131,7 +129,9 @@ def validate():
             ("POLYMARKET_PASSPHRASE",     POLYMARKET_PASSPHRASE),
         ]:
             if not val:
-                errors.append(f"{name} is not set in .env (required for live trading)")
+                errors.append(
+                    f"{name} is not set in .env (required for live trading)"
+                )
     if errors:
         print("\n❌ Config errors:\n")
         for e in errors:

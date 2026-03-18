@@ -7,7 +7,7 @@ Subclasses only implement evaluate_signal().
 import asyncio
 import logging
 from datetime import datetime
-from config import PAPER_TRADING
+from config import PAPER_TRADING, NO_ENTRY_FIRST_SECS
 from database.db import Database
 from feeds.polymarket import PolymarketFeed
 from feeds.binance_ws import BinanceFeed
@@ -127,6 +127,10 @@ class BaseBot:
 
         # Have market but no odds yet — wait, don't re-fetch
         if not self.poly.up_odds:
+            return
+
+        # Don't enter in first 60s — odds not yet formed
+        if self.poly.seconds_elapsed < NO_ENTRY_FIRST_SECS:
             return
 
         token = (self.poly.up_token_id if (self.binance.momentum_30s or 0) >= 0
