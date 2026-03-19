@@ -133,4 +133,4 @@ class KellySizer:
             full_k * KELLY_FRACTION * abs_conf * bankroll,
             bankroll * MAX_BET_PCT
         )
-        return round(max(1.0, stake), 2)
+        return round(max(5.0, stake), 2)   # Polymarket minimum = 5 shares

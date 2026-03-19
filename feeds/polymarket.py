@@ -297,7 +297,72 @@ class PolymarketFeed:
             logger.info("[PAPER Bot%s] %s size=%.2f price=%.3f",
                         bot_id, direction.upper(), size, price)
             return {"status": "filled", "filled_price": price, "paper": True}
-        raise NotImplementedError("Live trading requires py-clob-client. See README.")
+
+        # ── Live order via py-clob-client ──────────────────────────────────
+        try:
+            from py_clob_client.client import ClobClient
+            from py_clob_client.clob_types import ApiCreds, OrderArgs, OrderType
+            from py_clob_client.constants import POLYGON
+            from config import (
+                POLYMARKET_PRIVATE_KEY, POLYMARKET_FUNDER_ADDRESS,
+                POLYMARKET_API_KEY, POLYMARKET_API_SECRET, POLYMARKET_PASSPHRASE,
+            )
+
+            creds = ApiCreds(
+                api_key        = POLYMARKET_API_KEY,
+                api_secret     = POLYMARKET_API_SECRET,
+                api_passphrase = POLYMARKET_PASSPHRASE,
+            )
+            client = ClobClient(
+                host           = POLYMARKET_CLOB_URL,
+                key            = POLYMARKET_PRIVATE_KEY,
+                chain_id       = POLYGON,
+                creds          = creds,
+                funder         = POLYMARKET_FUNDER_ADDRESS,
+                signature_type = 1,   # EOA — required for Magic/Gmail wallet
+            )
+
+            # Round price to valid tick (0.01 increments)
+            rounded_price = round(round(price / 0.01) * 0.01, 4)
+
+            # Polymarket orders are in shares, not USDC
+            shares = round(size / rounded_price, 2)
+
+            order_args = OrderArgs(
+                token_id = token_id,
+                price    = rounded_price,
+                size     = shares,
+                side     = "BUY" if direction != "sell" else "SELL",
+            )
+
+            signed_order = client.create_order(order_args)
+            resp         = client.post_order(signed_order, OrderType.GTC)
+
+            if resp and resp.get("success"):
+                filled_price = float(resp.get("price", rounded_price))
+                filled_size  = float(resp.get("size", shares))
+                logger.info(
+                    "[LIVE Bot%s] %s FILLED | size=%.2f price=%.3f order_id=%s",
+                    bot_id, direction.upper(), filled_size, filled_price,
+                    resp.get("orderID", "?")
+                )
+                return {
+                    "status":       "filled",
+                    "filled_price": filled_price,
+                    "filled_size":  filled_size,
+                    "order_id":     resp.get("orderID"),
+                    "paper":        False,
+                }
+            else:
+                logger.error("[LIVE Bot%s] Order rejected: %s", bot_id, resp)
+                return {"status": "failed", "reason": str(resp)}
+
+        except ImportError:
+            logger.error("py-clob-client not installed — pip install py-clob-client")
+            return {"status": "failed", "reason": "missing_dependency"}
+        except Exception as e:
+            logger.error("[LIVE Bot%s] Order error: %s", bot_id, e)
+            return {"status": "failed", "reason": str(e)}
 
     # ── Timing ─────────────────────────────────────────────────────────────────
 

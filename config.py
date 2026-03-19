@@ -27,12 +27,12 @@ PAPER_TRADING = False       # global flag — False enables live trading
 
 # ── Per-bot paper/live mode ────────────────────────────────────────────────────
 # Allows running Bot A live while Bot B stays on paper simultaneously
-BOT_A_PAPER_TRADING = False  # Bot A goes live
-BOT_B_PAPER_TRADING = True   # Bot B stays paper until payout ratio improves
+BOT_A_PAPER_TRADING = False  # Bot A live
+BOT_B_PAPER_TRADING = True   # Bot B paper (disabled anyway)
 
 # ── Bot enable flags ───────────────────────────────────────────────────────────
-BOT_A_ENABLED = True        # Chainlink lag — profitable with filters
-BOT_B_ENABLED = True        # Hybrid — needs one more day to confirm
+BOT_A_ENABLED = True        # Chainlink lag — going live
+BOT_B_ENABLED = False       # Hybrid — disabled until payout ratio improves
 
 # ── Live conflict rule ─────────────────────────────────────────────────────────
 LIVE_CONFLICT_RULE = "higher_confidence"

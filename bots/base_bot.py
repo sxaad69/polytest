@@ -49,7 +49,7 @@ class BaseBot:
         self._running = True
         self._log.info("Bot %s starting | mode=%s bankroll=%.2f",
                        self.BOT_ID,
-                       "PAPER" if paper else "LIVE",
+                       "PAPER" if self.executor.paper_trading else "LIVE",
                        self.STARTING_BANKROLL)
         tasks = [
             asyncio.create_task(self.executor.start_monitor(),
