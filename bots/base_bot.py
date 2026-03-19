@@ -7,7 +7,7 @@ Subclasses only implement evaluate_signal().
 import asyncio
 import logging
 from datetime import datetime
-from config import PAPER_TRADING, NO_ENTRY_FIRST_SECS
+from config import PAPER_TRADING, NO_ENTRY_FIRST_SECS, BOT_A_PAPER_TRADING, BOT_B_PAPER_TRADING
 from database.db import Database
 from feeds.polymarket import PolymarketFeed
 from feeds.binance_ws import BinanceFeed
@@ -34,9 +34,13 @@ class BaseBot:
         self.cb        = CircuitBreaker()
         self.sizer     = KellySizer()
         self.bankroll  = BankrollTracker(self.STARTING_BANKROLL)
+        # Determine paper mode for this specific bot
+        paper = BOT_A_PAPER_TRADING if self.BOT_ID == "A" else BOT_B_PAPER_TRADING
+
         self.executor  = ExecutionLayer(
             self.BOT_ID, self.db, self.poly,
-            self.cb, self.bankroll, self.STARTING_BANKROLL
+            self.cb, self.bankroll, self.STARTING_BANKROLL,
+            paper_trading=paper
         )
         self._running  = False
         self._log      = logging.getLogger(f"bot_{self.BOT_ID.lower()}")
@@ -45,7 +49,7 @@ class BaseBot:
         self._running = True
         self._log.info("Bot %s starting | mode=%s bankroll=%.2f",
                        self.BOT_ID,
-                       "PAPER" if PAPER_TRADING else "LIVE",
+                       "PAPER" if paper else "LIVE",
                        self.STARTING_BANKROLL)
         tasks = [
             asyncio.create_task(self.executor.start_monitor(),
@@ -96,9 +100,10 @@ class BaseBot:
             return
 
         self._log.info(
-            "[Bot%s] ✓ ACTIVE | BTC=%.2f | CL=%.2f | dev=%.3f%% "
+            "[Bot%s] ✓ ACTIVE | mode=%s | BTC=%.2f | CL=%.2f | dev=%.3f%% "
             "| up=%.2f down=%.2f | ends_in=%.0fs | positions=%d | bankroll=%.2f",
             self.BOT_ID,
+            "PAPER" if self.executor.paper_trading else "LIVE",
             self.binance.price or 0,
             self.chainlink.price or 0,
             self.chainlink.deviation_pct,

@@ -15,7 +15,7 @@ import time
 from datetime import datetime
 from config import (
     TAKE_PROFIT_DELTA, TRAILING_STOP_DELTA, TRAILING_STOP_ENABLED,
-    HARD_STOP_SECONDS, POSITION_POLL_SECS, PAPER_TRADING,
+    HARD_STOP_SECONDS, POSITION_POLL_SECS,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,13 +42,15 @@ class BankrollTracker:
 class ExecutionLayer:
 
     def __init__(self, bot_id: str, db, poly_feed, circuit_breaker,
-                 bankroll: BankrollTracker, starting_bankroll: float):
+                 bankroll: BankrollTracker, starting_bankroll: float,
+                 paper_trading: bool = True):
         self.bot_id            = bot_id
         self.db                = db
         self.poly              = poly_feed
         self.cb                = circuit_breaker
         self.bankroll          = bankroll
         self.starting_bankroll = starting_bankroll
+        self.paper_trading     = paper_trading
         self._positions: dict  = {}
 
     # ── Entry ──────────────────────────────────────────────────────────────────
@@ -68,7 +70,8 @@ class ExecutionLayer:
             return None
 
         order = await self.poly.place_order(
-            direction, token_id, stake, entry_odds, self.bot_id
+            direction, token_id, stake, entry_odds, self.bot_id,
+            paper=self.paper_trading
         )
         if order.get("status") != "filled":
             return None
@@ -101,7 +104,8 @@ class ExecutionLayer:
         }
         self.bankroll.reserve(stake)
         logger.info("[Bot%s][%s] ENTER | id=%s dir=%s odds=%.3f stake=%.2f",
-                    self.bot_id, "PAPER" if PAPER_TRADING else "LIVE",
+                    self.bot_id,
+                    "PAPER" if self.paper_trading else "LIVE",
                     trade_id, direction, filled, stake)
         return trade_id
 
@@ -168,7 +172,8 @@ class ExecutionLayer:
                     exit_odds: float, reason: str):
         await self.poly.place_order(
             "sell", pos["token_id"],
-            pos["stake_usdc"], exit_odds, self.bot_id
+            pos["stake_usdc"], exit_odds, self.bot_id,
+            paper=self.paper_trading
         )
         pnl, outcome = self.db.log_exit(trade_id, {
             "ts_exit":        datetime.utcnow().isoformat(),

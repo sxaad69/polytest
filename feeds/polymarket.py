@@ -291,8 +291,9 @@ class PolymarketFeed:
     # ── Order placement ────────────────────────────────────────────────────────
 
     async def place_order(self, direction: str, token_id: str,
-                          size: float, price: float, bot_id: str) -> dict:
-        if PAPER_TRADING:
+                          size: float, price: float, bot_id: str,
+                          paper: bool = True) -> dict:
+        if paper:
             logger.info("[PAPER Bot%s] %s size=%.2f price=%.3f",
                         bot_id, direction.upper(), size, price)
             return {"status": "filled", "filled_price": price, "paper": True}

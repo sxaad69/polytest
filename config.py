@@ -23,7 +23,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── Mode ───────────────────────────────────────────────────────────────────────
-PAPER_TRADING = True        # flip to False when going live
+PAPER_TRADING = False       # global flag — False enables live trading
+
+# ── Per-bot paper/live mode ────────────────────────────────────────────────────
+# Allows running Bot A live while Bot B stays on paper simultaneously
+BOT_A_PAPER_TRADING = False  # Bot A goes live
+BOT_B_PAPER_TRADING = True   # Bot B stays paper until payout ratio improves
 
 # ── Bot enable flags ───────────────────────────────────────────────────────────
 BOT_A_ENABLED = True        # Chainlink lag — profitable with filters
@@ -120,7 +125,8 @@ def validate():
             "ALCHEMY_RPC_URL is not set in .env\n"
             "  → https://dashboard.alchemy.com → Create App → Ethereum Mainnet"
         )
-    if not PAPER_TRADING:
+    # Check live credentials if any bot is going live
+    if not BOT_A_PAPER_TRADING or not BOT_B_PAPER_TRADING:
         for name, val in [
             ("POLYMARKET_PRIVATE_KEY",    POLYMARKET_PRIVATE_KEY),
             ("POLYMARKET_FUNDER_ADDRESS", POLYMARKET_FUNDER_ADDRESS),
