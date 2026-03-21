@@ -112,6 +112,10 @@ BOT_F_MARKET_PATTERN     = "*"   # Monitor all market types
 BOT_G_MIN_CONFIDENCE  = 0.003    # Minimum combined momentum+lag score
 BOT_G_MARKET_PATTERN  = "*-updown-5m-*"  # All crypto 5m updown markets
 
+# ── Global Portfolio Risk ──────────────────────────────────────────────────────
+GLOBAL_MAX_EXPOSURE_PCT = 0.30   # Max 30% of total bankroll in flight at once
+GLOBAL_DAILY_LOSS_LIMIT = 0.15   # 15% across all bots triggers global halt
+
 # ── Circuit breaker ────────────────────────────────────────────────────────────
 CIRCUIT_BREAKER_ENABLED = False   # paper mode — flip True for live
 MAX_CONSECUTIVE_LOSSES  = 5

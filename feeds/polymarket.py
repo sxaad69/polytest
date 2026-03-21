@@ -80,78 +80,80 @@ class PolymarketFeed:
     def odds_velocity(self):
         return self.markets.get(self._default_up_id, {}).get("velocity", 0.0)
 
-    # ── Market discovery ───────────────────────────────────────────────────────
+    async def start_discovery(self, interval: int = 60):
+        """Background loop to discover all active markets efficiently."""
+        logger.info("Polymarket discovery service starting | interval=%ds", interval)
+        while self._running:
+            try:
+                await self.refresh_all_markets()
+            except Exception as e:
+                logger.error("Discovery loop error: %s", e)
+            await asyncio.sleep(interval)
 
-    async def fetch_market(self) -> bool:
-        """Legacy method for Bot A/B backward compatibility."""
-        return await self.fetch_markets_by_pattern("btc-updown-5m-*")
-
-    async def fetch_markets_by_pattern(self, pattern: str) -> bool:
-        """Fetches all active markets matching a slug pattern and registers them."""
+    async def refresh_all_markets(self) -> bool:
+        """Fetches ALL active markets from Gamma and updates the shared registry."""
         try:
             now = time.time()
             async with self._session.get(
                 f"{POLYMARKET_GAMMA_URL}/markets",
                 params={"active": "true"},
-                timeout=aiohttp.ClientTimeout(total=10)
+                timeout=aiohttp.ClientTimeout(total=15)
             ) as resp:
                 all_markets = await resp.json()
             
             markets = all_markets if isinstance(all_markets, list) else all_markets.get("markets", [])
-            matches = [m for m in markets if fnmatch.fnmatch(m.get("slug", ""), pattern)]
-            
-            if not matches:
-                logger.debug("No markets matching pattern: %s", pattern)
-                return False
-
             count = 0
-            for m in matches:
-                # Basic registration
-                tid_up, tid_down = self._parse_clob_ids(m)
-                if not tid_up or not tid_down:
-                    continue
-                
-                # Check window (for updown markets)
+            for m in markets:
                 slug = m.get("slug", "")
-                win_ts = self._extract_ts_from_slug(slug)
-                win_start = float(win_ts) if win_ts else now
-                win_end = win_start + WINDOW_SECONDS
+                if not slug: continue
                 
-                # Register market state
+                tid_up, tid_down = self._parse_clob_ids(m)
+                if not tid_up or not tid_down: continue
+                
+                win_ts    = self._extract_ts_from_slug(slug)
+                win_start = float(win_ts) if win_ts else now
+                win_end   = win_start + WINDOW_SECONDS
+                
+                # Register metadata
                 for tid, peer in [(tid_up, tid_down), (tid_down, tid_up)]:
                     if tid not in self.markets:
                         self.markets[tid] = {
                             "odds": None,
                             "history": deque(maxlen=60),
                             "velocity": 0.0,
-                            "bids": [],
-                            "asks": [],
-                            "depth": 0.0,
+                            "bids": [], "asks": [], "depth": 0.0,
                             "win_start": win_start,
                             "win_end": win_end,
                             "slug": slug,
-                            "peer_id": peer,   # Store complementary token for auto-hedge logic
+                            "peer_id": peer,
                             "condition_id": self._extract_condition_id(m)
                         }
+                    else:
+                        self.markets[tid]["win_start"] = win_start
+                        self.markets[tid]["win_end"] = win_end
                 
-                # Compatibility seeding for BTC-UPDOWN
+                # Legacy BTC-UPDOWN
                 if "btc-updown-5m-" in slug and win_start <= now < win_end:
                     self._default_up_id = tid_up
                     self._default_down_id = tid_down
                     self._default_window = {"start": win_start, "end": win_end}
                     self.taker_fee_bps = int(m.get("takerBaseFee", 0)) // 100
-                
                 count += 1
-
-            if count > 0:
-                logger.info("Registered %d markets for pattern: %s", count, pattern)
-                await self.resubscribe()
-                return True
-            return False
-
+            
+            await self.resubscribe()
+            return True
         except Exception as e:
-            logger.error("fetch_markets_by_pattern error: %s", e)
+            logger.error("refresh_all_markets error: %s", e)
             return False
+
+    async def fetch_markets_by_pattern(self, pattern: str) -> bool:
+        """Reads from already-populated shared registry."""
+        matches = [tid for tid, m in self.markets.items() 
+                   if fnmatch.fnmatch(m.get("slug", ""), pattern)]
+        return len(matches) > 0
+
+    async def fetch_market(self) -> bool:
+        return await self.fetch_markets_by_pattern("btc-updown-5m-*")
 
     def _extract_condition_id(self, m: dict) -> str | None:
         return m.get("conditionId") or m.get("condition_id")

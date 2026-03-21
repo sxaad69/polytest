@@ -21,7 +21,8 @@ class PreTradeFilters:
 
     def check(self, db, confidence: float, odds: float,
               depth: float, secs_remaining: float,
-              market_id: str = None) -> tuple:
+              market_id: str = None, stake: float = 0.0,
+              global_risk: 'GlobalRiskManager' = None) -> tuple:
 
         checks = [
             self._confidence(confidence),
@@ -29,6 +30,7 @@ class PreTradeFilters:
             self._depth(depth),
             self._timing(secs_remaining),
             self._circuit_breaker(db),
+            self._global_exposure(global_risk, stake),
         ]
         for passed, reason in checks:
             if not passed:
@@ -72,6 +74,11 @@ class PreTradeFilters:
         if cb["halted"]:
             return False, f"circuit_breaker:{cb['halted_reason']}"
         return True, ""
+
+    def _global_exposure(self, global_risk, stake: float) -> tuple:
+        if not global_risk or stake <= 0:
+            return True, ""
+        return global_risk.can_enter(stake)
 
 
 class CircuitBreaker:
@@ -137,40 +144,52 @@ class KellySizer:
 
 
 class GlobalRiskManager:
-    @staticmethod
-    def check_health(bots_dict: dict) -> bool:
-        """
-        Aggregates daily losses across all bots and halts if limit is hit.
-        bots_dict: {bot_id: bot_instance}
-        """
-        total_daily_loss = 0.0
-        total_initial_bankroll = 0.0
-        
-        # We need the initial bankrolls from config for accurate % calculation
+    """
+    Portfolio-level risk control.
+    """
+    def __init__(self, bots_dict: dict):
+        self.bots = bots_dict
         import config
-        bankrolls = {
+        self.max_exposure_pct = config.GLOBAL_MAX_EXPOSURE_PCT
+        self.daily_loss_limit = config.GLOBAL_DAILY_LOSS_LIMIT
+        self.initial_bankrolls = {
             "A": config.BOT_A_BANKROLL, "B": config.BOT_B_BANKROLL, 
             "C": config.BOT_C_BANKROLL, "D": config.BOT_D_BANKROLL,
             "E": config.BOT_E_BANKROLL, "F": config.BOT_F_BANKROLL, 
             "G": config.BOT_G_BANKROLL
         }
+        self._total_bankroll = sum(self.initial_bankrolls.values())
+
+    def can_enter(self, stake: float) -> tuple:
+        """Checks if a new trade would exceed global exposure limits."""
+        current_exposure = 0.0
+        for bot in self.bots.values():
+            if hasattr(bot, "executor") and bot.executor:
+                for pos in bot.executor._positions.values():
+                    current_exposure += pos.get("stake_usdc", 0.0)
         
-        for bid, bot in bots_dict.items():
+        limit = self._total_bankroll * self.max_exposure_pct
+        if (current_exposure + stake) > limit:
+            return False, f"global_exposure_limit:{current_exposure+stake:.1f}/{limit:.1f}"
+        
+        return True, ""
+
+    def check_health(self) -> bool:
+        """Aggregates and enforces global circuit breakers."""
+        total_daily_loss = 0.0
+        for bid, bot in self.bots.items():
             cb = bot.db.get_cb()
             total_daily_loss += cb.get('daily_loss_usdc', 0.0)
-            total_initial_bankroll += bankrolls.get(bid, 100.0)
             
-        if total_initial_bankroll > 0:
-            loss_pct = total_daily_loss / total_initial_bankroll
-            if loss_pct >= config.DAILY_LOSS_LIMIT_PCT:
-                logger.critical("GLOBAL CIRCUIT BREAKER: Total loss %.1f%% / Limit %.1f%% | HALTING ALL", 
-                              loss_pct*100, config.DAILY_LOSS_LIMIT_PCT*100)
-                for bot in bots_dict.values():
-                    # Correctly fetch and update EACH bot's state
-                    b_cb = bot.db.get_cb()
-                    bot.db.update_cb(b_cb.get('consecutive_losses', 0), 
-                                     b_cb.get('daily_loss_usdc', 0),
-                                     halted=True, reason="global_loss_limit")
-                return False
+        loss_pct = total_daily_loss / max(self._total_bankroll, 1)
+        if loss_pct >= self.daily_loss_limit:
+            logger.critical("GLOBAL CIRCUIT BREAKER: Total loss %.1f%% | HALTING ALL", 
+                          loss_pct*100)
+            for bot in self.bots.values():
+                b_cb = bot.db.get_cb()
+                bot.db.update_cb(b_cb.get('consecutive_losses', 0), 
+                                 b_cb.get('daily_loss_usdc', 0),
+                                 halted=True, reason="global_loss_limit")
+            return False
         
         return True

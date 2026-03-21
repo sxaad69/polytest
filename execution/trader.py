@@ -60,7 +60,17 @@ class ExecutionLayer:
                     token_id: str = None, entry_odds: float = None,
                     market_id: str = None, win_end: float = None,
                     win_start: float = None):
-        
+        # Global risk gate
+        if hasattr(self, "global_risk") and self.global_risk:
+            passed, reason = self.global_risk.can_enter(stake)
+            if not passed:
+                import logging
+                logging.getLogger(f"bot_{self.bot_id.lower()}").warning(
+                    "Global Risk Manager skipped trade: %s", reason
+                )
+                self.db.log_skip(reason, confidence, entry_odds or 0.0, market_id)
+                return
+
         # Backward compatibility for legacy bots (A/B)
         if not token_id:
             if direction == "long":

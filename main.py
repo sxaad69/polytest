@@ -82,10 +82,21 @@ class Orchestrator:
             for bot_class, _, bot_id in active_registry:
                 self.bots[bot_id] = bot_class(self.binance, self.chainlink, self.poly)
 
+            # Centralized risk parsing
+            self.global_risk = GlobalRiskManager(self.bots)
+            for bot in self.bots.values():
+                bot.global_risk = self.global_risk
+                if hasattr(bot, "executor") and bot.executor:
+                    bot.executor.global_risk = self.global_risk
+
+            # First seed the shared registry
+            await self.poly.refresh_all_markets()
+
             tasks = [
                 asyncio.create_task(self.binance.start(),          name="binance_ws"),
                 asyncio.create_task(self.chainlink.start(),        name="chainlink"),
                 asyncio.create_task(self.poly.start_odds_stream(), name="poly_ws"),
+                asyncio.create_task(self.poly.start_discovery(),   name="poly_discovery"),
             ]
             
             # Start bot main loops
@@ -116,7 +127,7 @@ class Orchestrator:
         """Monitors global circuit breaker across all bots."""
         logger.info("Global risk monitor active")
         while self._running:
-            if not GlobalRiskManager.check_health(self.bots):
+            if self.global_risk and not self.global_risk.check_health():
                 logger.critical("GLOBAL HALT TRIGGERED — SHUTTING DOWN")
                 self._running = False
                 # Trigger clean shutdown by throwing a custom exception or just stopping
