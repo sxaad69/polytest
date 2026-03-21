@@ -9,9 +9,9 @@ import logging
 import time
 from datetime import datetime
 from config import (
-    BOT_C_BANKROLL, BOT_C_DB_PATH, BOT_C_ENABLED, 
+    BOT_C_BANKROLL, BOT_C_DB_PATH, 
     MAX_BET_PCT, MIN_ODDS, MAX_ODDS, ARB_THRESHOLD,
-    NO_ENTRY_LAST_SECS
+    NO_ENTRY_LAST_SECS, BOT_C_NO_ENTRY_LAST_SECS
 )
 from bots.base_bot import BaseBot
 from signals.signal_c import BotCSignal
@@ -28,7 +28,7 @@ class BotC(BaseBot):
     def __init__(self, binance, chainlink, poly):
         super().__init__(binance, chainlink, poly)
         self._signal = BotCSignal(arb_threshold=getattr(self, 'ARB_THRESHOLD', 0.985))
-        self.processed_markets = set()
+        self.processed_markets = {} # condition_id -> win_end
 
     async def _loop(self):
         """Custom loop for Bot C to monitor multiple markets."""
@@ -36,6 +36,10 @@ class BotC(BaseBot):
         
         while self._running:
             try:
+                # Cleanup expired arbs from memory
+                now = time.time()
+                self.processed_markets = {cid: end for cid, end in self.processed_markets.items() if end > now}
+
                 # 1. Discover/Update markets (pattern based)
                 # In a real environment, we'd use a specific pattern like 'btc-updown-*' or '*'
                 pattern = "*" # Monitor all discovered
@@ -49,6 +53,11 @@ class BotC(BaseBot):
                     if not peer_id or tid > peer_id: 
                         continue
                         
+                    # Get condition_id for deduplication
+                    cid = m.get("condition_id")
+                    if cid in self.processed_markets:
+                        continue
+
                     await self._evaluate_market(tid, peer_id, m)
                     
             except Exception as e:
@@ -60,14 +69,9 @@ class BotC(BaseBot):
         m_no = self.poly.markets.get(tid_no)
         if not m_no: return
 
-        # Skip if already traded in this window/market
-        market_id = m_yes.get("condition_id")
-        if market_id in self.processed_markets: 
-            return
-
-        # Timing check - don't enter near close
+        # Timing check - use Bot C specific timing for arbs
         secs_remaining = m_yes.get("win_end", 0) - time.time()
-        if secs_remaining < NO_ENTRY_LAST_SECS:
+        if secs_remaining < BOT_C_NO_ENTRY_LAST_SECS:
             return
 
         # 1. Fetch deep books for both
@@ -76,12 +80,17 @@ class BotC(BaseBot):
             self.poly.fetch_book(tid_no)
         )
 
-        # 2. Calculate VWAP for a test stake (e.g. 10.0)
-        target_stake = 10.0
-        yes_vwap = calculate_vwap(m_yes.get("asks", []), target_stake/2)
-        no_vwap = calculate_vwap(m_no.get("asks", []), target_stake/2)
+        # 2. Calculate Stake FIRST
+        # This fixes the depth mismatch bug
+        stake = min(self.bankroll.available * 0.10, 50.0) 
+        if stake <= 5.0: return # Polymarket min
 
-        # 3. Evaluate Signal
+        # 3. Calculate VWAP for the EXACT stake per leg
+        yes_vwap = calculate_vwap(m_yes.get("asks", []), stake/2)
+        no_vwap = calculate_vwap(m_no.get("asks", []), stake/2)
+
+        # 4. Evaluate Signal
+        market_id = m_yes.get("condition_id")
         result = self._signal.evaluate(
             market_id=market_id,
             token_yes=tid_yes,
@@ -90,11 +99,11 @@ class BotC(BaseBot):
             no_vwap=no_vwap
         )
 
-        # 4. Check Global Filters
+        # 5. Check Global Filters
         passed, reason = self.filters.check(
             db=self.db,
             confidence=result.score,
-            odds=result.sum_price / 2, # Average odds for filtering
+            odds=result.sum_price / 2,
             depth=m_yes.get("depth", 0) + m_no.get("depth", 0),
             secs_remaining=secs_remaining,
             market_id=market_id
@@ -103,16 +112,12 @@ class BotC(BaseBot):
         if not passed or not result.tradeable:
             return
 
-        # 5. Kelly Sizing (simplified for Arb)
-        # For Arb, we can use a higher fixed percentage as it's "risk-free"
-        stake = min(self.bankroll.available * 0.10, 50.0) # Cap at 50 USDC for safety
-        
-        # 6. Execute Execute Arb (Two market orders)
+        # 6. Execute Arb
         self._log.info("[BotC] ARB FOUND | market=%s yes=%.3f no=%.3f sum=%.3f stake=%.2f",
                        market_id[:10], yes_vwap, no_vwap, result.sum_price, stake)
         
         await self._enter_arb(tid_yes, tid_no, stake/2, yes_vwap, no_vwap, result)
-        self.processed_markets.add(market_id)
+        self.processed_markets[market_id] = m_yes.get("win_end", 0)
 
     async def _enter_arb(self, tid_yes, tid_no, stake_per_leg, price_yes, price_no, result):
         # Place both orders
@@ -132,8 +137,13 @@ class BotC(BaseBot):
             self.bankroll.reserve(stake_per_leg * 2)
             self._log.info("[BotC] ARB EXECUTED | Locked in %.2f%% profit", (1.0 - result.sum_price)*100)
         else:
-            self._log.error("[BotC] ARB FAILED | Yes:%s No:%s", 
-                            success_yes.get("status"), success_no.get("status"))
+            # PARTIAL FILL ROLLBACK (Crude): If one filled, try to sell it
+            if success_yes.get("status") == "filled" or success_no.get("status") == "filled":
+                self._log.critical("[BotC] PARTIAL FILL DETECTED — RISK EXPOSED")
+                # In live mode we should fire off a sell order immediately
+                # In paper mode we just log the imbalance
+                failed_leg = "NO" if success_yes.get("status") == "filled" else "YES"
+                self._log.error("[BotC] Leg 1 filled, Leg 2 (%s) failed. Trade is UNHEDGED.", failed_leg)
 
     def evaluate_signal(self):
         # Not used by custom loop but needed for BaseBot abstract parity

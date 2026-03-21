@@ -5,8 +5,7 @@ Uses L2 Orderbook VWAP for accurate entry pricing.
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
-from config import BOT_C_BANKROLL, MIN_ODDS, MAX_ODDS
+from config import MIN_ODDS, MAX_ODDS
 
 @dataclass
 class BotCResult:

@@ -61,6 +61,7 @@ MIN_BOOK_DEPTH      = 50.0
 NO_ENTRY_LAST_SECS  = 180   # don't enter if <180s remaining (data confirmed)
 NO_ENTRY_FIRST_SECS = 60    # don't enter in first 60s (odds not formed)
 WINDOW_DURATION     = 300
+BOT_C_NO_ENTRY_LAST_SECS = 30  # arbs lock in profit immediately
 
 # ── Bot A thresholds (Chainlink lag) ───────────────────────────────────────────
 # Data showed edge at 0.20-0.40% deviation band
