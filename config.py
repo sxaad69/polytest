@@ -32,6 +32,8 @@ BOT_B_PAPER_TRADING = True   # Bot B paper
 BOT_C_PAPER_TRADING = True   # Bot C paper
 BOT_D_PAPER_TRADING = True   # Bot D paper
 BOT_E_PAPER_TRADING = True   # Bot E paper
+BOT_F_PAPER_TRADING = True   # Bot F paper
+BOT_G_PAPER_TRADING = True   # Bot G paper
 
 # ── Bot enable flags ───────────────────────────────────────────────────────────
 BOT_A_ENABLED = True        # Chainlink lag
@@ -39,8 +41,8 @@ BOT_B_ENABLED = False       # Hybrid
 BOT_C_ENABLED = True        # Arbitrage
 BOT_D_ENABLED = True        # Sports spikes
 BOT_E_ENABLED = True        # Momentum
-BOT_F_ENABLED = False       # Copytrade
-BOT_G_ENABLED = False       # Crypto
+BOT_F_ENABLED = True        # Copytrade
+BOT_G_ENABLED = True        # Crypto
 
 # ── Live conflict rule ─────────────────────────────────────────────────────────
 LIVE_CONFLICT_RULE = "higher_confidence"
@@ -100,6 +102,15 @@ BOT_D_MARKET_PATTERNS   = [      # Sports slug patterns to scan
 
 # ── Bot E thresholds (Momentum) ────────────────────────────────────────────────
 BOT_E_MIN_VELOCITY = 0.015 # Minimum 30s velocity delta to trigger entry
+
+# ── Bot F thresholds (Copytrade) ────────────────────────────────────────────────
+BOT_F_ACCURACY_THRESHOLD = 0.65  # Slug must resolve correctly 65%+ of time
+BOT_F_MIN_SAMPLES        = 20    # Minimum historical resolutions required
+BOT_F_MARKET_PATTERN     = "*"   # Monitor all market types
+
+# ── Bot G thresholds (Crypto) ──────────────────────────────────────────────────
+BOT_G_MIN_CONFIDENCE  = 0.003    # Minimum combined momentum+lag score
+BOT_G_MARKET_PATTERN  = "*-updown-5m-*"  # All crypto 5m updown markets
 
 # ── Circuit breaker ────────────────────────────────────────────────────────────
 CIRCUIT_BREAKER_ENABLED = False   # paper mode — flip True for live

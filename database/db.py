@@ -397,3 +397,40 @@ class Database:
         total_cost   = stake + entry_fee
 
         return round(net_exit - total_cost, 6)
+
+    def get_slug_accuracies(self) -> dict:
+        """
+        For Bot F (Copytrade): returns slug_type -> {accuracy, samples}
+        based on resolved trades in this DB.
+        accuracy = wins / total resolved trades for that slug type.
+        """
+        try:
+            with self._conn() as conn:
+                rows = conn.execute("""
+                    SELECT market_id, outcome
+                    FROM trades
+                    WHERE outcome IS NOT NULL
+                      AND ts_exit IS NOT NULL
+                """).fetchall()
+        except Exception:
+            return {}
+
+        from collections import defaultdict
+        slug_data = defaultdict(lambda: {"wins": 0, "total": 0})
+        for row in rows:
+            mid = row["market_id"] or ""
+            # Strip trailing timestamp to get slug type
+            slug_type = "-".join(mid.split("-")[:-1]) if mid else mid
+            slug_data[slug_type]["total"] += 1
+            if row["outcome"] == "win":
+                slug_data[slug_type]["wins"] += 1
+
+        result = {}
+        for slug_type, data in slug_data.items():
+            total = data["total"]
+            if total > 0:
+                result[slug_type] = {
+                    "accuracy": round(data["wins"] / total, 4),
+                    "samples":  total,
+                }
+        return result

@@ -42,6 +42,8 @@ class BaseBot:
             "C": config.BOT_C_PAPER_TRADING,
             "D": config.BOT_D_PAPER_TRADING,
             "E": config.BOT_E_PAPER_TRADING,
+            "F": config.BOT_F_PAPER_TRADING,
+            "G": config.BOT_G_PAPER_TRADING,
         }
         paper = paper_map.get(self.BOT_ID, True)
 

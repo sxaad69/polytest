@@ -23,6 +23,8 @@ from bots.bot_b import BotB
 from bots.bot_c import BotC
 from bots.bot_d import BotD
 from bots.bot_e import BotE
+from bots.bot_f import BotF
+from bots.bot_g import BotG
 from execution.redeemer import Redeemer
 from risk.manager import GlobalRiskManager
 from analytics.comparison import print_comparison
@@ -58,6 +60,8 @@ class Orchestrator:
             (BotC, BOT_C_ENABLED, "C"),
             (BotD, BOT_D_ENABLED, "D"),
             (BotE, BOT_E_ENABLED, "E"),
+            (BotF, BOT_F_ENABLED, "F"),
+            (BotG, BOT_G_ENABLED, "G"),
         ]
         
         active_registry = [r for r in registry if r[1]]
