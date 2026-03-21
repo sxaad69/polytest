@@ -20,6 +20,7 @@ from feeds.chainlink import ChainlinkFeed
 from feeds.polymarket import PolymarketFeed
 from bots.bot_a import BotA
 from bots.bot_b import BotB
+from bots.bot_c import BotC
 from execution.redeemer import Redeemer
 from risk.manager import GlobalRiskManager
 from analytics.comparison import print_comparison
@@ -52,6 +53,7 @@ class Orchestrator:
         registry = [
             (BotA, BOT_A_ENABLED, "A"),
             (BotB, BOT_B_ENABLED, "B"),
+            (BotC, BOT_C_ENABLED, "C"),
         ]
         
         active_registry = [r for r in registry if r[1]]

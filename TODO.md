@@ -23,3 +23,9 @@
 - [x] Step 2: Implement Global Risk Health Check
 - [x] Step 3: Integrate `Redeemer` into `Orchestrator` shutdown
 - [x] Step 4: Commit
+
+# Task 5: Bot C Implementation (GLOB Arb)
+- [x] Step 1: Implement `signals/signal_c.py` (VWAP Arb logic)
+- [x] Step 2: Implement `bots/bot_c.py` (Multi-market monitor)
+- [x] Step 3: Register `BotC` in `Orchestrator`
+- [x] Step 4: Verify discovery and paper mode

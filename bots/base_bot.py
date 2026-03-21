@@ -35,7 +35,13 @@ class BaseBot:
         self.sizer     = KellySizer()
         self.bankroll  = BankrollTracker(self.STARTING_BANKROLL)
         # Determine paper mode for this specific bot
-        paper = BOT_A_PAPER_TRADING if self.BOT_ID == "A" else BOT_B_PAPER_TRADING
+        import config
+        paper_map = {
+            "A": config.BOT_A_PAPER_TRADING,
+            "B": config.BOT_B_PAPER_TRADING,
+            "C": config.BOT_C_PAPER_TRADING,
+        }
+        paper = paper_map.get(self.BOT_ID, True)
 
         self.executor  = ExecutionLayer(
             self.BOT_ID, self.db, self.poly,

@@ -28,12 +28,13 @@ PAPER_TRADING = False       # global flag — False enables live trading
 # ── Per-bot paper/live mode ────────────────────────────────────────────────────
 # Allows running Bot A live while Bot B stays on paper simultaneously
 BOT_A_PAPER_TRADING = False  # Bot A live
-BOT_B_PAPER_TRADING = True   # Bot B paper (disabled anyway)
+BOT_B_PAPER_TRADING = True   # Bot B paper
+BOT_C_PAPER_TRADING = True   # Bot C paper
 
 # ── Bot enable flags ───────────────────────────────────────────────────────────
 BOT_A_ENABLED = True        # Chainlink lag
 BOT_B_ENABLED = False       # Hybrid
-BOT_C_ENABLED = False       # Arbitrage
+BOT_C_ENABLED = True        # Arbitrage
 BOT_D_ENABLED = False       # Sports
 BOT_E_ENABLED = False       # Momentum
 BOT_F_ENABLED = False       # Copytrade
@@ -80,6 +81,10 @@ BOT_B_SIGNAL_WEIGHTS = {
 }
 BOT_B_LAG_BOOST  = 0.25   # strong reward when lag confirms direction
 BOT_B_LAG_DAMPEN = 0.60   # strong penalty when lag contradicts
+
+# ── Bot C thresholds (GLOB Arb) ────────────────────────────────────────────────
+ARB_THRESHOLD = 0.985      # Entry when (Yes_Ask + No_Ask) <= 0.985
+BOT_C_MARKET_PATTERN = "*" # Pattern to scan
 
 # ── Circuit breaker ────────────────────────────────────────────────────────────
 CIRCUIT_BREAKER_ENABLED = False   # paper mode — flip True for live
