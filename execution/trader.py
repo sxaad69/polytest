@@ -52,6 +52,33 @@ class ExecutionLayer:
         self.starting_bankroll = starting_bankroll
         self.paper_trading     = paper_trading
         self._positions: dict  = {}
+        self._load_positions()
+
+    def _load_positions(self):
+        """Reconstruct in-memory actively managed positions from DB on crash restart."""
+        open_trades = self.db.open_trades()
+        for t in open_trades:
+            tid = t.get("id")
+            stake = t.get("stake_usdc", 0.0)
+            token = t.get("token_id")
+            if not token: # Very old DB entry compat
+                token = self.poly.up_token_id if t.get("direction") == "long" else self.poly.down_token_id
+            
+            self._positions[tid] = {
+                "trade_id":   tid,
+                "direction":  t.get("direction"),
+                "token_id":   token,
+                "market_id":  t.get("market_id"),
+                "entry_odds": t.get("entry_odds", 0.0),
+                "peak_odds":  t.get("peak_odds", 0.0),
+                "stake_usdc": stake,
+                "window_end": datetime.fromisoformat(t["window_end"]).timestamp() if t.get("window_end") else None,
+                "confidence": 0.0,  # Legacy restored missing confidence
+            }
+            self.bankroll.reserve(stake)
+        
+        if open_trades:
+            logger.info("[Bot%s] Reloaded %d active trades from database", self.bot_id, len(open_trades))
 
     # ── Entry ──────────────────────────────────────────────────────────────────
 
@@ -60,17 +87,6 @@ class ExecutionLayer:
                     token_id: str = None, entry_odds: float = None,
                     market_id: str = None, win_end: float = None,
                     win_start: float = None):
-        # Global risk gate
-        if hasattr(self, "global_risk") and self.global_risk:
-            passed, reason = self.global_risk.can_enter(stake)
-            if not passed:
-                import logging
-                logging.getLogger(f"bot_{self.bot_id.lower()}").warning(
-                    "Global Risk Manager skipped trade: %s", reason
-                )
-                self.db.log_skip(reason, confidence, entry_odds or 0.0, market_id)
-                return
-
         # Backward compatibility for legacy bots (A/B)
         if not token_id:
             if direction == "long":
@@ -86,6 +102,17 @@ class ExecutionLayer:
                 win_end    = self.poly.window_end
                 win_start  = self.poly.window_start
 
+        # Global risk gate
+        if hasattr(self, "global_risk") and self.global_risk:
+            passed, reason = self.global_risk.can_enter(stake, token_id)
+            if not passed:
+                import logging
+                logging.getLogger(f"bot_{self.bot_id.lower()}").warning(
+                    "Global Risk Manager skipped trade: %s", reason
+                )
+                self.db.log_skip(reason, confidence, entry_odds or 0.0, market_id)
+                return
+
         if not entry_odds or not token_id:
             logger.warning("[Bot%s] No odds/token — skipping entry", self.bot_id)
             return None
@@ -98,6 +125,12 @@ class ExecutionLayer:
             return None
 
         filled   = order.get("filled_price", entry_odds)
+        order_id = order.get("order_id")
+        
+        if self.paper_trading and not order_id:
+            import uuid
+            order_id = f"paper-{uuid.uuid4()}"
+            
         trade_id = self.db.log_entry({
             "signal_id":      signal_id,
             "ts_entry":       datetime.utcnow().isoformat(),
@@ -109,6 +142,8 @@ class ExecutionLayer:
             "direction":      direction,
             "entry_odds":     filled,
             "stake_usdc":     stake,
+            "token_id":       token_id,
+            "clob_order_id":  order_id,
             "taker_fee_bps":  self.poly.taker_fee_bps,
             "chainlink_open": None,
         })

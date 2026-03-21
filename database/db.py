@@ -59,7 +59,9 @@ CREATE TABLE IF NOT EXISTS trades (
     market_condition_id TEXT,  -- bytes32
     outcome_index       INTEGER, -- YES=0, NO=1 or similar
     redeemed            INTEGER DEFAULT 0,
-    resolved        INTEGER DEFAULT 0
+    resolved            INTEGER DEFAULT 0,
+    clob_order_id       TEXT,
+    token_id            TEXT
 );
 
 CREATE TABLE IF NOT EXISTS skipped (
@@ -128,6 +130,10 @@ class Database:
                 conn.execute("ALTER TABLE trades ADD COLUMN outcome_index INTEGER")
             if "redeemed" not in existing_cols:
                 conn.execute("ALTER TABLE trades ADD COLUMN redeemed INTEGER DEFAULT 0")
+            if "clob_order_id" not in existing_cols:
+                conn.execute("ALTER TABLE trades ADD COLUMN clob_order_id TEXT")
+            if "token_id" not in existing_cols:
+                conn.execute("ALTER TABLE trades ADD COLUMN token_id TEXT")
 
             conn.execute("""
                 INSERT OR IGNORE INTO circuit_breaker (id, last_reset_date)
@@ -179,18 +185,22 @@ class Database:
                     window_start, window_end, direction,
                     entry_odds, peak_odds, stake_usdc,
                     taker_fee_bps, chainlink_open,
-                    market_condition_id, outcome_index
+                    market_condition_id, outcome_index,
+                    clob_order_id, token_id
                 ) VALUES (
                     :signal_id, :bot, :ts_entry, :market_id,
                     :window_start, :window_end, :direction,
                     :entry_odds, :entry_odds, :stake_usdc,
                     :taker_fee_bps, :chainlink_open,
-                    :market_condition_id, :outcome_index
+                    :market_condition_id, :outcome_index,
+                    :clob_order_id, :token_id
                 )
             """, {**t, "bot": self.bot_id,
                   "taker_fee_bps": t.get("taker_fee_bps", 0),
                   "market_condition_id": t.get("market_condition_id"),
-                  "outcome_index": t.get("outcome_index")})
+                  "outcome_index": t.get("outcome_index"),
+                  "clob_order_id": t.get("clob_order_id"),
+                  "token_id": t.get("token_id")})
             return cur.lastrowid
 
     def log_exit(self, trade_id: int, e: dict) -> tuple:

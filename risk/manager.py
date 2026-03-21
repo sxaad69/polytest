@@ -160,12 +160,14 @@ class GlobalRiskManager:
         }
         self._total_bankroll = sum(self.initial_bankrolls.values())
 
-    def can_enter(self, stake: float) -> tuple:
-        """Checks if a new trade would exceed global exposure limits."""
+    def can_enter(self, stake: float, token_id: str = None) -> tuple:
+        """Checks if a new trade would exceed global limits or create a token conflict."""
         current_exposure = 0.0
         for bot in self.bots.values():
             if hasattr(bot, "executor") and bot.executor:
                 for pos in bot.executor._positions.values():
+                    if token_id and pos.get("token_id") == token_id:
+                        return False, f"cross_bot_conflict:already_holding_{token_id[:12]}"
                     current_exposure += pos.get("stake_usdc", 0.0)
         
         limit = self._total_bankroll * self.max_exposure_pct
