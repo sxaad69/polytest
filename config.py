@@ -23,21 +23,21 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── Mode ───────────────────────────────────────────────────────────────────────
-PAPER_TRADING = False       # global flag — False enables live trading
+PAPER_TRADING = True       # global flag — True keeps everything on paper
 
 # ── Per-bot paper/live mode ────────────────────────────────────────────────────
 # Allows running Bot A live while Bot B stays on paper simultaneously
-BOT_A_PAPER_TRADING = False  # Bot A live
-BOT_B_PAPER_TRADING = True   # Bot B paper
-BOT_C_PAPER_TRADING = True   # Bot C paper
-BOT_D_PAPER_TRADING = True   # Bot D paper
-BOT_E_PAPER_TRADING = True   # Bot E paper
-BOT_F_PAPER_TRADING = True   # Bot F paper
-BOT_G_PAPER_TRADING = True   # Bot G paper
+BOT_A_PAPER_TRADING = True
+BOT_B_PAPER_TRADING = True
+BOT_C_PAPER_TRADING = True
+BOT_D_PAPER_TRADING = True
+BOT_E_PAPER_TRADING = True
+BOT_F_PAPER_TRADING = True
+BOT_G_PAPER_TRADING = True
 
 # ── Bot enable flags ───────────────────────────────────────────────────────────
 BOT_A_ENABLED = True        # Chainlink lag
-BOT_B_ENABLED = False       # Hybrid
+BOT_B_ENABLED = True        # Hybrid
 BOT_C_ENABLED = True        # Arbitrage
 BOT_D_ENABLED = True        # Sports spikes
 BOT_E_ENABLED = True        # Momentum
