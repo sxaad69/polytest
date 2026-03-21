@@ -11,7 +11,8 @@ import time
 from datetime import datetime
 from config import (
     BOT_G_BANKROLL, BOT_G_DB_PATH,
-    BOT_G_MARKET_PATTERN, NO_ENTRY_LAST_SECS
+    BOT_G_MARKET_PATTERN, NO_ENTRY_LAST_SECS,
+    BOT_G_MIN_CONFIDENCE
 )
 from bots.base_bot import BaseBot
 from signals.signal_g import BotGSignal
@@ -27,7 +28,7 @@ class BotG(BaseBot):
 
     def __init__(self, binance, chainlink, poly):
         super().__init__(binance, chainlink, poly)
-        self._signal = BotGSignal()
+        self._signal = BotGSignal(min_confidence=BOT_G_MIN_CONFIDENCE)
         self.max_concurrent_trades = 4
 
     async def _loop(self):

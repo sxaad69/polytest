@@ -6,7 +6,6 @@ and applies the same lag arbitrage strategy.
 """
 
 from dataclasses import dataclass
-from config import BOT_G_MIN_CONFIDENCE
 
 
 @dataclass

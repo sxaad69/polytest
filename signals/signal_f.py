@@ -7,7 +7,7 @@ past, we mirror the current market bias (buy whichever side is > 0.55).
 """
 
 from dataclasses import dataclass
-from config import MIN_ODDS, MAX_ODDS, BOT_F_ACCURACY_THRESHOLD, BOT_F_MIN_SAMPLES
+from config import MIN_ODDS, MAX_ODDS
 
 
 @dataclass

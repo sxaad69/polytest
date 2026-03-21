@@ -35,3 +35,12 @@
 - [x] Step 2: Generalize `ExecutionLayer` for multi-market tokens
 - [x] Step 3: Implement `bots/bot_e.py` (Price trending)
 - [x] Step 4: Register `BotE` and verify
+
+# Task 7: Bot F (Copytrade) Implementation
+- [x] Step 1: Implement `signals/signal_f.py`
+- [x] Step 2: Implement `bots/bot_f.py`
+- [x] Step 3: Add `get_slug_accuracies` to `db.py`
+
+# Task 8: Bot G (Crypto) Implementation
+- [x] Step 1: Implement `signals/signal_g.py`
+- [x] Step 2: Implement `bots/bot_g.py`
