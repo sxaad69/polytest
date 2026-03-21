@@ -118,7 +118,7 @@ class BotE(BaseBot):
         signal_id = self.db.log_signal({
             "ts": datetime.utcnow().isoformat(),
             "market_id": market_id,
-            "direction": "long", # Buying the trend token (even if it's the 'short' side)
+            "direction": result.direction,
             "confidence_score": result.score,
             "polymarket_odds": trade_odds,
             "odds_velocity": velocity,
@@ -126,7 +126,7 @@ class BotE(BaseBot):
             "features": result.components
         })
         
-        await self.executor.enter("long", result.score, stake, signal_id, 
+        await self.executor.enter(result.direction, result.score, stake, signal_id, 
                                   token_id=trade_token_id, 
                                   entry_odds=trade_odds,
                                   market_id=market_id,

@@ -79,6 +79,10 @@ class PolymarketFeed:
     @property
     def odds_velocity(self):
         return self.markets.get(self._default_up_id, {}).get("velocity", 0.0)
+        
+    @property
+    def market_id(self):
+        return self.markets.get(self._default_up_id, {}).get("condition_id")
 
     async def start_discovery(self, interval: int = 60):
         """Background loop to discover all active markets efficiently."""
@@ -239,10 +243,12 @@ class PolymarketFeed:
     async def _ws_connect(self):
         async with websockets.connect(POLY_WS_URL) as ws:
             self._ws = ws
+            self._subscribed_tids = set() # Reset on fresh connect
             logger.info("Polymarket WS connected")
-            # Subscribe immediately if we already have tokens
-            if self.up_token_id and self.down_token_id:
+            
+            if self.markets:
                 await self._subscribe(ws)
+                
             async for raw in ws:
                 if not self._running:
                     break
@@ -250,22 +256,31 @@ class PolymarketFeed:
         self._ws = None
 
     async def _subscribe(self, ws):
-        """Subscribe to price and book updates for all registered markets."""
-        tids = list(self.markets.keys())
-        if not tids: return
+        """Subscribe to price and book updates for newly registered markets."""
+        if not hasattr(self, '_subscribed_tids'):
+            self._subscribed_tids = set()
+            
+        new_tids = [tid for tid in self.markets.keys() if tid not in self._subscribed_tids]
+        if not new_tids: 
+            return
         
         await ws.send(json.dumps({
-            "assets_ids": tids,
+            "assets_ids": new_tids,
             "type":       "market",
         }))
-        logger.info("WS subscribed | %d tokens", len(tids))
-        await self._seed_odds()
+        logger.info("WS subscribed | +%d new tokens", len(new_tids))
+        
+        for t in new_tids:
+            self._subscribed_tids.add(t)
+            
+        await self._seed_odds(new_tids)
 
-    async def _seed_odds(self):
-        """Fetch current odds via REST to seed initial state."""
+    async def _seed_odds(self, tids: list):
+        """Fetch current odds via REST to seed initial state for new tokens."""
         try:
-            for tid, m in list(self.markets.items()):
-                if m["odds"] is not None: continue
+            for tid in tids:
+                m = self.markets.get(tid)
+                if not m or m["odds"] is not None: continue
                 
                 async with self._session.get(
                     f"{POLYMARKET_CLOB_URL}/midpoint",

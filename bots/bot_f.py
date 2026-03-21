@@ -135,7 +135,7 @@ class BotF(BaseBot):
         })
 
         await self.executor.enter(
-            "long", result.score, stake, signal_id,
+            result.direction, result.score, stake, signal_id,
             token_id=trade_token_id,
             entry_odds=trade_odds,
             market_id=market_id,
