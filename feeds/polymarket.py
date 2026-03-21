@@ -30,104 +30,158 @@ POLY_WS_URL    = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 WINDOW_SECONDS = 300   # 5-minute windows
 
 
+import fnmatch
+from utils.pm_math import calculate_vwap
+
 class PolymarketFeed:
 
     def __init__(self):
-        self.market_id       = None
-        self.condition_id    = None
-        self.window_start    = None
-        self.window_end      = None
-        self.up_token_id     = None
-        self.down_token_id   = None
-        self.up_odds         = None
-        self.down_odds       = None
-        self.book_depth      = 0.0
-        self.odds_velocity   = 0.0
-        self.taker_fee_bps   = 0     # fetched per market, in basis points
-        self.maker_fee_bps   = 0
-        self._odds_history        = deque(maxlen=60)
-        self._running             = False
-        self._session             = None
-        self._ws                  = None   # active WS connection for resubscribe
+        # Multi-market state: token_id -> market_data
+        self.markets = {}
+        
+        # Compatibility trackers for legacy Bots A and B (BTC-UPDOWN)
+        self._default_up_id = None
+        self._default_down_id = None
+        self._default_window = {"start": None, "end": None}
+        
+        self.taker_fee_bps = 0
+        self.maker_fee_bps = 0
+        self._running      = False
+        self._session      = None
+        self._ws           = None
+
+    # ── Compatibility Layer (to avoid breaking Bot A & B) ──────────────────────
+
+    @property
+    def up_token_id(self): return self._default_up_id
+    
+    @property
+    def down_token_id(self): return self._default_down_id
+
+    @property
+    def up_odds(self): 
+        return self.markets.get(self._default_up_id, {}).get("odds")
+
+    @property
+    def down_odds(self):
+        return self.markets.get(self._default_down_id, {}).get("odds")
+
+    @property
+    def window_start(self): return self._default_window["start"]
+
+    @property
+    def window_end(self): return self._default_window["end"]
+
+    @property
+    def book_depth(self):
+        return self.markets.get(self._default_up_id, {}).get("depth", 0.0)
+
+    @property
+    def odds_velocity(self):
+        return self.markets.get(self._default_up_id, {}).get("velocity", 0.0)
 
     # ── Market discovery ───────────────────────────────────────────────────────
 
     async def fetch_market(self) -> bool:
+        """Legacy method for Bot A/B backward compatibility."""
+        return await self.fetch_markets_by_pattern("btc-updown-5m-*")
+
+    async def fetch_markets_by_pattern(self, pattern: str) -> bool:
+        """Fetches all active markets matching a slug pattern and registers them."""
         try:
-            now       = time.time()
-            window_ts = int(now // WINDOW_SECONDS) * WINDOW_SECONDS
+            now = time.time()
+            async with self._session.get(
+                f"{POLYMARKET_GAMMA_URL}/markets",
+                params={"active": "true"},
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                all_markets = await resp.json()
+            
+            markets = all_markets if isinstance(all_markets, list) else all_markets.get("markets", [])
+            matches = [m for m in markets if fnmatch.fnmatch(m.get("slug", ""), pattern)]
+            
+            if not matches:
+                logger.debug("No markets matching pattern: %s", pattern)
+                return False
 
-            # Try current and adjacent windows via direct slug lookup
-            # This works even on AWS US where restricted markets are
-            # filtered out of general active scans
-            for ts in [window_ts, window_ts - WINDOW_SECONDS, window_ts + WINDOW_SECONDS]:
-                slug = f"btc-updown-5m-{ts}"
-                m    = await self._fetch_by_slug(slug)
-                if not m:
+            count = 0
+            for m in matches:
+                # Basic registration
+                tid_up, tid_down = self._parse_clob_ids(m)
+                if not tid_up or not tid_down:
                     continue
+                
+                # Check window (for updown markets)
+                slug = m.get("slug", "")
+                win_ts = self._extract_ts_from_slug(slug)
+                win_start = float(win_ts) if win_ts else now
+                win_end = win_start + WINDOW_SECONDS
+                
+                # Register market state
+                for tid, peer in [(tid_up, tid_down), (tid_down, tid_up)]:
+                    if tid not in self.markets:
+                        self.markets[tid] = {
+                            "odds": None,
+                            "history": deque(maxlen=60),
+                            "velocity": 0.0,
+                            "bids": [],
+                            "asks": [],
+                            "depth": 0.0,
+                            "win_start": win_start,
+                            "win_end": win_end,
+                            "slug": slug,
+                            "peer_id": peer,   # Store complementary token for auto-hedge logic
+                            "condition_id": self._extract_condition_id(m)
+                        }
+                
+                # Compatibility seeding for BTC-UPDOWN
+                if "btc-updown-5m-" in slug and win_start <= now < win_end:
+                    self._default_up_id = tid_up
+                    self._default_down_id = tid_down
+                    self._default_window = {"start": win_start, "end": win_end}
+                    self.taker_fee_bps = int(m.get("takerBaseFee", 0)) // 100
+                
+                count += 1
 
-                # Window times come from the slug timestamp directly —
-                # startDateIso/endDateIso are plain dates (not datetimes)
-                win_start = float(ts)
-                win_end   = win_start + WINDOW_SECONDS
-
-                if not (win_start <= now < win_end):
-                    continue
-
-                self.market_id    = m["id"]
-                self.condition_id = m.get("conditionId") or m.get("condition_id")
-                self.window_start = win_start
-                self.window_end   = win_end
-
-                # clobTokenIds can be a list or a JSON-encoded string
-                clob_ids = m.get("clobTokenIds", [])
-                if isinstance(clob_ids, str):
-                    import json as _json
-                    try:
-                        clob_ids = _json.loads(clob_ids)
-                    except Exception:
-                        clob_ids = []
-
-                outcomes = m.get("outcomes", [])
-
-                if clob_ids and len(clob_ids) >= 2:
-                    # Match token IDs to outcomes by index
-                    for i, outcome in enumerate(outcomes):
-                        o = outcome.lower()
-                        if o in ("up", "yes") and i < len(clob_ids):
-                            self.up_token_id = clob_ids[i]
-                        elif o in ("down", "no") and i < len(clob_ids):
-                            self.down_token_id = clob_ids[i]
-
-                    # Fallback: if outcomes order unknown, just assign by index
-                    if not self.up_token_id and len(clob_ids) >= 2:
-                        self.up_token_id   = clob_ids[0]
-                        self.down_token_id = clob_ids[1]
-
-                # takerBaseFee raw value is in hundredths of a basis point
-                # 1000 raw = 1000/100 = 10 bps = 0.10% per trade
-                # spread=0.01 confirms 1% total (entry + exit combined)
-                raw_taker           = int(m.get("takerBaseFee") or 0)
-                raw_maker           = int(m.get("makerBaseFee") or 0)
-                self.taker_fee_bps  = raw_taker // 100   # convert to real bps
-                self.maker_fee_bps  = raw_maker // 100
-
-                logger.info("Market found | slug=%s ends_in=%.0fs | up=%s... down=%s... | taker_fee=%.2f%%",
-                            slug, win_end - now,
-                            (self.up_token_id or "?")[:10],
-                            (self.down_token_id or "?")[:10],
-                            self.taker_fee_bps / 100)
-
-                # Subscribe WS to new tokens immediately
+            if count > 0:
+                logger.info("Registered %d markets for pattern: %s", count, pattern)
                 await self.resubscribe()
                 return True
-
-            logger.info("No active BTC 5m market right now — will retry in 10s")
             return False
 
         except Exception as e:
-            logger.error("fetch_market error: %s", e)
+            logger.error("fetch_markets_by_pattern error: %s", e)
             return False
+
+    def _extract_condition_id(self, m: dict) -> str | None:
+        return m.get("conditionId") or m.get("condition_id")
+
+    def _parse_clob_ids(self, market_data: dict) -> tuple:
+        clob_ids = market_data.get("clobTokenIds", [])
+        if isinstance(clob_ids, str):
+            try: clob_ids = json.loads(clob_ids)
+            except: clob_ids = []
+        
+        outcomes = market_data.get("outcomes", [])
+        up_id = down_id = None
+        
+        if clob_ids and len(clob_ids) >= 2:
+            for i, o in enumerate(outcomes):
+                name = o.lower()
+                if name in ("up", "yes") and i < len(clob_ids):
+                    up_id = clob_ids[i]
+                elif name in ("down", "no") and i < len(clob_ids):
+                    down_id = clob_ids[i]
+            
+            if not up_id: # fallback
+                up_id, down_id = clob_ids[0], clob_ids[1]
+                
+        return up_id, down_id
+
+    def _extract_ts_from_slug(self, slug: str) -> int | None:
+        try:
+            return int(slug.split("-")[-1])
+        except: return None
 
     async def _fetch_by_slug(self, slug: str) -> dict | None:
         """Fetch a single market from Gamma API by slug."""
@@ -147,6 +201,7 @@ class PolymarketFeed:
     # ── Order book ─────────────────────────────────────────────────────────────
 
     async def fetch_book(self, token_id: str):
+        """Fetches Orderbook snapshot from CLOB REST API."""
         try:
             async with self._session.get(
                 f"{POLYMARKET_CLOB_URL}/book",
@@ -154,10 +209,18 @@ class PolymarketFeed:
                 timeout=aiohttp.ClientTimeout(total=10)
             ) as resp:
                 book = await resp.json()
+            
             bids = book.get("bids", [])
-            self.book_depth = sum(
-                float(b["price"]) * float(b["size"]) for b in bids[:3]
-            )
+            asks = book.get("asks", [])
+            
+            if token_id in self.markets:
+                self.markets[token_id]["bids"] = bids
+                self.markets[token_id]["asks"] = asks
+                # Update legacy book_depth if this is the default market
+                if token_id == self._default_up_id:
+                    self.markets[token_id]["depth"] = sum(
+                        float(b["price"]) * float(b["size"]) for b in bids[:3]
+                    )
         except Exception as e:
             logger.debug("fetch_book error: %s", e)
 
@@ -186,44 +249,43 @@ class PolymarketFeed:
         self._ws = None
 
     async def _subscribe(self, ws):
-        """Subscribe to price updates for current market tokens."""
+        """Subscribe to price and book updates for all registered markets."""
+        tids = list(self.markets.keys())
+        if not tids: return
+        
         await ws.send(json.dumps({
-            "assets_ids": [self.up_token_id, self.down_token_id],
+            "assets_ids": tids,
             "type":       "market",
         }))
-        logger.info("WS subscribed | up=%s... down=%s...",
-                    self.up_token_id[:10], self.down_token_id[:10])
-        # Seed initial odds via REST — WS only pushes on change
-        # so if market just opened we'd wait indefinitely for first push
+        logger.info("WS subscribed | %d tokens", len(tids))
         await self._seed_odds()
 
     async def _seed_odds(self):
         """Fetch current odds via REST to seed initial state."""
         try:
-            for token_id, which in [
-                (self.up_token_id, "up"),
-                (self.down_token_id, "down"),
-            ]:
-                if not token_id:
-                    continue
+            for tid, m in list(self.markets.items()):
+                if m["odds"] is not None: continue
+                
                 async with self._session.get(
                     f"{POLYMARKET_CLOB_URL}/midpoint",
-                    params={"token_id": token_id},
+                    params={"token_id": tid},
                     timeout=aiohttp.ClientTimeout(total=5)
                 ) as resp:
                     d = await resp.json()
+                
                 mid = float(d.get("mid", 0))
                 if mid > 0:
-                    if which == "up":
-                        self.up_odds   = mid
-                        self.down_odds = round(1.0 - mid, 4)
-                    else:
-                        self.down_odds = mid
-                        self.up_odds   = round(1.0 - mid, 4)
-                    self._odds_history.append((time.time(), self.up_odds or 0.5))
-            if self.up_odds:
-                logger.info("Odds seeded via REST | up=%.3f down=%.3f",
-                            self.up_odds, self.down_odds)
+                    m["odds"] = mid
+                    m["history"].append((time.time(), mid))
+                    self._update_velocity(tid)
+                    
+                    # Complementary seed
+                    peer_id = m.get("peer_id")
+                    if peer_id and peer_id in self.markets:
+                        comp_price = calculate_hedge_price(mid)
+                        self.markets[peer_id]["odds"] = comp_price
+            
+            logger.info("Odds seeded via REST for %d markets", len(self.markets))
         except Exception as e:
             logger.debug("Odds seed error: %s", e)
 
@@ -240,41 +302,65 @@ class PolymarketFeed:
 
     def _handle(self, raw: str):
         try:
-            msg    = json.loads(raw)
+            msg = json.loads(raw)
             events = msg if isinstance(msg, list) else [msg]
+            
             for event in events:
-                if not isinstance(event, dict):
-                    continue
-                tid   = event.get("asset_id")
+                if not isinstance(event, dict): continue
+                tid = event.get("asset_id")
+                if not tid or tid not in self.markets: continue
+
+                # Price Change Update
                 price = event.get("price")
-                if not tid or price is None:
-                    continue
-                price = float(price)
-                if tid == self.up_token_id:
-                    self.up_odds   = price
-                    self.down_odds = round(1.0 - price, 4)
-                elif tid == self.down_token_id:
-                    self.down_odds = price
-                    self.up_odds   = round(1.0 - price, 4)
-                self._odds_history.append((time.time(), self.up_odds or 0.5))
-                self._update_velocity()
+                if price is not None:
+                    price = float(price)
+                    self.markets[tid]["odds"] = price
+                    self.markets[tid]["history"].append((time.time(), price))
+                    self._update_velocity(tid)
+                    
+                    # Complementary odds for binary markets (auto-hedge logic)
+                    peer_id = self.markets[tid].get("peer_id")
+                    if peer_id and peer_id in self.markets:
+                        self.markets[peer_id]["odds"] = calculate_hedge_price(price)
+
+                # L2 Book Update
+                book = event.get("book")
+                if book:
+                    self.markets[tid]["bids"] = book.get("bids", [])
+                    self.markets[tid]["asks"] = book.get("asks", [])
+                    # calculate_vwap use could go here if needed per tick
+
         except Exception as e:
             logger.debug("WS parse error: %s", e)
+
+    def _update_velocity(self, tid: str):
+        m = self.markets.get(tid)
+        if not m: return
+        cutoff = time.time() - 30
+        history = list(m["history"])
+        history = [(t, p) for t, p in history if t >= cutoff]
+        m["velocity"] = round(
+            history[-1][1] - history[0][1], 4
+        ) if len(history) >= 2 else 0.0
 
     async def _poll_fallback(self):
         while self._running:
             try:
-                if self.up_token_id:
+                if self._default_up_id:
                     async with self._session.get(
                         f"{POLYMARKET_CLOB_URL}/midpoint",
-                        params={"token_id": self.up_token_id},
+                        params={"token_id": self._default_up_id},
                         timeout=aiohttp.ClientTimeout(total=10)
                     ) as resp:
                         d = await resp.json()
-                    self.up_odds   = float(d.get("mid", 0.5))
-                    self.down_odds = round(1.0 - self.up_odds, 4)
-                    self._odds_history.append((time.time(), self.up_odds))
-                    self._update_velocity()
+                    mid = float(d.get("mid", 0.5))
+                    self.markets[self._default_up_id]["odds"] = mid
+                    self.markets[self._default_up_id]["history"].append((time.time(), mid))
+                    self._update_velocity(self._default_up_id)
+                    
+                    if self._default_down_id:
+                        self.markets[self._default_down_id]["odds"] = calculate_hedge_price(mid)
+
                     logger.debug("Odds polled | up=%.3f down=%.3f",
                                  self.up_odds, self.down_odds)
             except Exception as e:

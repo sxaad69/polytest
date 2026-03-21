@@ -56,6 +56,9 @@ CREATE TABLE IF NOT EXISTS trades (
     exit_reason     TEXT,
     chainlink_open  REAL,
     chainlink_close REAL,
+    market_condition_id TEXT,  -- bytes32
+    outcome_index       INTEGER, -- YES=0, NO=1 or similar
+    redeemed            INTEGER DEFAULT 0,
     resolved        INTEGER DEFAULT 0
 );
 
@@ -116,6 +119,16 @@ class Database:
     def _init(self):
         with self._conn() as conn:
             conn.executescript(SCHEMA)
+            
+            # Migration check for new columns (if table existed without them)
+            existing_cols = [r["name"] for r in conn.execute("PRAGMA table_info(trades)").fetchall()]
+            if "market_condition_id" not in existing_cols:
+                conn.execute("ALTER TABLE trades ADD COLUMN market_condition_id TEXT")
+            if "outcome_index" not in existing_cols:
+                conn.execute("ALTER TABLE trades ADD COLUMN outcome_index INTEGER")
+            if "redeemed" not in existing_cols:
+                conn.execute("ALTER TABLE trades ADD COLUMN redeemed INTEGER DEFAULT 0")
+
             conn.execute("""
                 INSERT OR IGNORE INTO circuit_breaker (id, last_reset_date)
                 VALUES (1, ?)
@@ -165,15 +178,19 @@ class Database:
                     signal_id, bot, ts_entry, market_id,
                     window_start, window_end, direction,
                     entry_odds, peak_odds, stake_usdc,
-                    taker_fee_bps, chainlink_open
+                    taker_fee_bps, chainlink_open,
+                    market_condition_id, outcome_index
                 ) VALUES (
                     :signal_id, :bot, :ts_entry, :market_id,
                     :window_start, :window_end, :direction,
                     :entry_odds, :entry_odds, :stake_usdc,
-                    :taker_fee_bps, :chainlink_open
+                    :taker_fee_bps, :chainlink_open,
+                    :market_condition_id, :outcome_index
                 )
             """, {**t, "bot": self.bot_id,
-                  "taker_fee_bps": t.get("taker_fee_bps", 0)})
+                  "taker_fee_bps": t.get("taker_fee_bps", 0),
+                  "market_condition_id": t.get("market_condition_id"),
+                  "outcome_index": t.get("outcome_index")})
             return cur.lastrowid
 
     def log_exit(self, trade_id: int, e: dict) -> tuple:
@@ -228,6 +245,20 @@ class Database:
                 VALUES (?,?,?,?,?,?,?)
             """, (datetime.utcnow().isoformat(), self.bot_id,
                   market_id, reason, confidence, odds, cl_dev))
+
+    def get_unredeemed_wins(self) -> list:
+        """Fetch all winning trades that haven't been redeemed yet."""
+        with self._conn() as conn:
+            rows = conn.execute("""
+                SELECT market_condition_id, outcome_index, id
+                FROM trades
+                WHERE outcome='win' AND redeemed=0 AND market_condition_id IS NOT NULL
+            """).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_redeemed(self, trade_id: int):
+        with self._conn() as conn:
+            conn.execute("UPDATE trades SET redeemed=1 WHERE id=?", (trade_id,))
 
     def get_cb(self) -> dict:
         with self._conn() as conn:

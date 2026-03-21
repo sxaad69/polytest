@@ -31,8 +31,13 @@ BOT_A_PAPER_TRADING = False  # Bot A live
 BOT_B_PAPER_TRADING = True   # Bot B paper (disabled anyway)
 
 # ── Bot enable flags ───────────────────────────────────────────────────────────
-BOT_A_ENABLED = True        # Chainlink lag — going live
-BOT_B_ENABLED = False       # Hybrid — disabled until payout ratio improves
+BOT_A_ENABLED = True        # Chainlink lag
+BOT_B_ENABLED = False       # Hybrid
+BOT_C_ENABLED = False       # Arbitrage
+BOT_D_ENABLED = False       # Sports
+BOT_E_ENABLED = False       # Momentum
+BOT_F_ENABLED = False       # Copytrade
+BOT_G_ENABLED = False       # Crypto
 
 # ── Live conflict rule ─────────────────────────────────────────────────────────
 LIVE_CONFLICT_RULE = "higher_confidence"
@@ -40,6 +45,11 @@ LIVE_CONFLICT_RULE = "higher_confidence"
 # ── Bankroll ───────────────────────────────────────────────────────────────────
 BOT_A_BANKROLL = 100.0
 BOT_B_BANKROLL = 100.0
+BOT_C_BANKROLL = 100.0
+BOT_D_BANKROLL = 100.0
+BOT_E_BANKROLL = 100.0
+BOT_F_BANKROLL = 100.0
+BOT_G_BANKROLL = 100.0
 MAX_BET_PCT    = 0.05
 KELLY_FRACTION = 0.25
 
@@ -112,6 +122,11 @@ _DATA_DIR.mkdir(exist_ok=True)
 
 BOT_A_DB_PATH = str(_DATA_DIR / "bot_a_paper.db")
 BOT_B_DB_PATH = str(_DATA_DIR / "bot_b_paper.db")
+BOT_C_DB_PATH = str(_DATA_DIR / "bot_c_paper.db")
+BOT_D_DB_PATH = str(_DATA_DIR / "bot_d_paper.db")
+BOT_E_DB_PATH = str(_DATA_DIR / "bot_e_paper.db")
+BOT_F_DB_PATH = str(_DATA_DIR / "bot_f_paper.db")
+BOT_G_DB_PATH = str(_DATA_DIR / "bot_g_paper.db")
 
 # ── Logging ────────────────────────────────────────────────────────────────────
 LOG_LEVEL = "INFO"

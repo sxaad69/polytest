@@ -31,7 +31,25 @@ def _query(db_path: str, sql: str, params=()) -> list:
         return []
 
 
-def print_comparison(bot_a_balance: float = None, bot_b_balance: float = None):
+def print_comparison(bot_balances: dict = None):
+    """Prints a comparison table for all bots in the given dict {name: balance}."""
+    from config import BOT_A_DB_PATH, BOT_B_DB_PATH, BOT_C_DB_PATH, BOT_D_DB_PATH, \
+                       BOT_E_DB_PATH, BOT_F_DB_PATH, BOT_G_DB_PATH, \
+                       BOT_A_BANKROLL, BOT_B_BANKROLL, BOT_C_BANKROLL, BOT_D_BANKROLL, \
+                       BOT_E_BANKROLL, BOT_F_BANKROLL, BOT_G_BANKROLL
+    
+    db_paths = {
+        "A": BOT_A_DB_PATH, "B": BOT_B_DB_PATH, "C": BOT_C_DB_PATH,
+        "D": BOT_D_DB_PATH, "E": BOT_E_DB_PATH, "F": BOT_F_DB_PATH, "G": BOT_G_DB_PATH
+    }
+    initial_bankrolls = {
+        "A": BOT_A_BANKROLL, "B": BOT_B_BANKROLL, "C": BOT_C_BANKROLL,
+        "D": BOT_D_BANKROLL, "E": BOT_E_BANKROLL, "F": BOT_F_BANKROLL, "G": BOT_G_BANKROLL
+    }
+    
+    if not bot_balances:
+        bot_balances = {"A": BOT_A_BANKROLL, "B": BOT_B_BANKROLL}
+    
     today = date.today().isoformat()
 
     def stats(path):
@@ -49,88 +67,52 @@ def print_comparison(bot_a_balance: float = None, bot_b_balance: float = None):
             FROM trades WHERE DATE(ts_entry)=? AND resolved=1
         """, (today,))
 
-    def dir_stats(path, direction):
-        return _one(path, """
-            SELECT COUNT(*) AS total,
-                ROUND(SUM(pnl_usdc),4) AS pnl,
-                ROUND(AVG(CASE WHEN outcome='win'
-                    THEN 1.0 ELSE 0.0 END)*100,1) AS win_rate
-            FROM trades
-            WHERE DATE(ts_entry)=? AND direction=? AND resolved=1
-        """, (today, direction))
+    # Data collection for enabled bots
+    data = {}
+    for bot_id, bal in bot_balances.items():
+        path = db_paths.get(bot_id)
+        if not path: continue
+        data[bot_id] = {
+            "stats": stats(path),
+            "balance": bal,
+            "initial": initial_bankrolls.get(bot_id, 100.0)
+        }
 
-    def lag_stats(path):
-        return _one(path, """
-            SELECT COUNT(t.id) AS total,
-                ROUND(AVG(CASE WHEN t.outcome='win'
-                    THEN 1.0 ELSE 0.0 END)*100,1) AS win_rate,
-                ROUND(SUM(t.pnl_usdc),4) AS pnl
-            FROM trades t
-            JOIN signals s ON t.signal_id=s.id
-            WHERE DATE(t.ts_entry)=? AND s.chainlink_lag_flag=1 AND t.resolved=1
-        """, (today,))
-
-    def skip_count(path):
-        r = _one(path, "SELECT COUNT(*) AS cnt FROM skipped WHERE DATE(ts)=?", (today,))
-        return r.get("cnt", 0)
-
-    a       = stats(BOT_A_DB_PATH)
-    b       = stats(BOT_B_DB_PATH)
-    a_long  = dir_stats(BOT_A_DB_PATH, "long")
-    b_long  = dir_stats(BOT_B_DB_PATH, "long")
-    a_short = dir_stats(BOT_A_DB_PATH, "short")
-    b_short = dir_stats(BOT_B_DB_PATH, "short")
-    a_lag   = lag_stats(BOT_A_DB_PATH)
-    b_lag   = lag_stats(BOT_B_DB_PATH)
-
-    bal_a = bot_a_balance or BOT_A_BANKROLL
-    bal_b = bot_b_balance or BOT_B_BANKROLL
+    if not data: return
 
     def v(d, k, fmt="{}"):
         val = d.get(k)
         val = 0 if val is None else val
-        try:
-            return fmt.format(val)
-        except Exception:
-            return str(val)
+        try: return fmt.format(val)
+        except: return str(val)
 
-    print("\n" + "═" * 70)
-    print(f"  Dual Bot Comparison — {today}")
-    print("═" * 70)
-    print(f"  {'Metric':<28} {'Bot A (Lag Only)':>18}  {'Bot B (Hybrid)':>18}")
-    print("  " + "─" * 66)
+    print("\n" + "═" * (30 + 15 * len(data)))
+    print(f"  Bot Comparison — {today}")
+    print("═" * (30 + 15 * len(data)))
+    
+    headers = "  " + f"{'Metric':<25}"
+    for bid in data.keys(): headers += f"{f'Bot {bid}':>15}"
+    print(headers)
+    print("  " + "─" * (25 + 15 * len(data)))
 
-    rows = [
-        ("Strategy",          "Chainlink lag only",       "Momentum + lag boost"),
-        ("Bankroll",          f"${bal_a:.2f}",             f"${bal_b:.2f}"),
-        ("Trades",            v(a,"total"),                v(b,"total")),
-        ("Wins",              v(a,"wins"),                 v(b,"wins")),
-        ("Losses",            v(a,"losses"),               v(b,"losses")),
-        ("Win rate",          v(a,"win_rate","{}%"),       v(b,"win_rate","{}%")),
-        ("Total PnL",         v(a,"pnl","{:+}"),          v(b,"pnl","{:+}")),
-        ("Expectancy/trade",  v(a,"expectancy","{:.5f}"),  v(b,"expectancy","{:.5f}")),
-        ("TP exits",          v(a,"tp"),                   v(b,"tp")),
-        ("Trailing exits",    v(a,"ts"),                   v(b,"ts")),
-        ("Hard stop exits",   v(a,"hs"),                   v(b,"hs")),
-        ("Skipped",           str(skip_count(BOT_A_DB_PATH)), str(skip_count(BOT_B_DB_PATH))),
-        ("─"*28,              "─"*18,                     "─"*18),
-        ("Long trades",       v(a_long,"total"),           v(b_long,"total")),
-        ("Long win rate",     v(a_long,"win_rate","{}%"),  v(b_long,"win_rate","{}%")),
-        ("Long PnL",          v(a_long,"pnl","{:+}"),     v(b_long,"pnl","{:+}")),
-        ("Short trades",      v(a_short,"total"),          v(b_short,"total")),
-        ("Short win rate",    v(a_short,"win_rate","{}%"), v(b_short,"win_rate","{}%")),
-        ("Short PnL",         v(a_short,"pnl","{:+}"),    v(b_short,"pnl","{:+}")),
-        ("─"*28,              "─"*18,                     "─"*18),
-        ("Lag trades",        v(a_lag,"total"),            v(b_lag,"total")),
-        ("Lag win rate",      v(a_lag,"win_rate","{}%"),   v(b_lag,"win_rate","{}%")),
-        ("Lag PnL",           v(a_lag,"pnl","{:+}"),      v(b_lag,"pnl","{:+}")),
+    metrics = [
+        ("Bankroll", lambda d: f"${d['balance']:.2f}"),
+        ("Trades", lambda d: v(d['stats'], "total")),
+        ("Wins", lambda d: v(d['stats'], "wins")),
+        ("Losses", lambda d: v(d['stats'], "losses")),
+        ("Win rate", lambda d: v(d['stats'], "win_rate", "{}%")),
+        ("Total PnL", lambda d: v(d['stats'], "pnl", "{:+}")),
+        ("TP exits", lambda d: v(d['stats'], "tp")),
+        ("Hard stop exits", lambda d: v(d['stats'], "hs")),
     ]
 
-    for label, va, vb in rows:
-        print(f"  {label:<28} {va:>18}  {vb:>18}")
+    for label, fetcher in metrics:
+        row = f"  {label:<25}"
+        for d in data.values():
+            row += f"{fetcher(d):>15}"
+        print(row)
 
-    print("  " + "─" * 66)
-    _verdict(a, b)
+    print("  " + "─" * (25 + 15 * len(data)))
     print("═" * 70 + "\n")
 
 

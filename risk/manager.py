@@ -134,3 +134,41 @@ class KellySizer:
             bankroll * MAX_BET_PCT
         )
         return round(max(5.0, stake), 2)   # Polymarket minimum = 5 shares
+
+
+class GlobalRiskManager:
+    @staticmethod
+    def check_health(bots_dict: dict) -> bool:
+        """
+        Aggregates daily losses across all bots and halts if limit is hit.
+        bots_dict: {bot_id: bot_instance}
+        """
+        total_daily_loss = 0.0
+        total_initial_bankroll = 0.0
+        
+        # We need the initial bankrolls from config for accurate % calculation
+        import config
+        bankrolls = {
+            "A": config.BOT_A_BANKROLL, "B": config.BOT_B_BANKROLL, 
+            "C": config.BOT_C_BANKROLL, "D": config.BOT_D_BANKROLL,
+            "E": config.BOT_E_BANKROLL, "F": config.BOT_F_BANKROLL, 
+            "G": config.BOT_G_BANKROLL
+        }
+        
+        for bid, bot in bots_dict.items():
+            cb = bot.db.get_cb()
+            total_daily_loss += cb.get('daily_loss_usdc', 0.0)
+            total_initial_bankroll += bankrolls.get(bid, 100.0)
+            
+        if total_initial_bankroll > 0:
+            loss_pct = total_daily_loss / total_initial_bankroll
+            if loss_pct >= config.DAILY_LOSS_LIMIT_PCT:
+                logger.critical("GLOBAL CIRCUIT BREAKER: Total loss %.1f%% / Limit %.1f%% | HALTING ALL", 
+                              loss_pct*100, config.DAILY_LOSS_LIMIT_PCT*100)
+                for bot in bots_dict.values():
+                    bot.db.update_cb(cb.get('consecutive_losses', 0), 
+                                     cb.get('daily_loss_usdc', 0),
+                                     halted=True, reason="global_loss_limit")
+                return False
+        
+        return True
