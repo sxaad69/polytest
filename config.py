@@ -30,13 +30,14 @@ PAPER_TRADING = False       # global flag — False enables live trading
 BOT_A_PAPER_TRADING = False  # Bot A live
 BOT_B_PAPER_TRADING = True   # Bot B paper
 BOT_C_PAPER_TRADING = True   # Bot C paper
+BOT_D_PAPER_TRADING = True   # Bot D paper
 BOT_E_PAPER_TRADING = True   # Bot E paper
 
 # ── Bot enable flags ───────────────────────────────────────────────────────────
 BOT_A_ENABLED = True        # Chainlink lag
 BOT_B_ENABLED = False       # Hybrid
 BOT_C_ENABLED = True        # Arbitrage
-BOT_D_ENABLED = False       # Sports
+BOT_D_ENABLED = True        # Sports spikes
 BOT_E_ENABLED = True        # Momentum
 BOT_F_ENABLED = False       # Copytrade
 BOT_G_ENABLED = False       # Crypto
@@ -87,6 +88,15 @@ BOT_B_LAG_DAMPEN = 0.60   # strong penalty when lag contradicts
 # ── Bot C thresholds (GLOB Arb) ────────────────────────────────────────────────
 ARB_THRESHOLD = 0.985      # Entry when (Yes_Ask + No_Ask) <= 0.985
 BOT_C_MARKET_PATTERN = "*" # Pattern to scan
+
+# ── Bot D thresholds (Sports Spike) ────────────────────────────────────────────
+BOT_D_SPIKE_THRESHOLD   = 0.05   # 5% 30s velocity spike to trigger
+BOT_D_FADE_ENABLED      = True   # True = fade spikes (mean reversion)
+BOT_D_MARKET_PATTERNS   = [      # Sports slug patterns to scan
+    "will-*-win-*",
+    "*nfl*", "*nba*", "*mlb*", "*nhl*",
+    "*soccer*", "*epl*", "*ufc*",
+]
 
 # ── Bot E thresholds (Momentum) ────────────────────────────────────────────────
 BOT_E_MIN_VELOCITY = 0.015 # Minimum 30s velocity delta to trigger entry

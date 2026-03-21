@@ -21,6 +21,7 @@ from feeds.polymarket import PolymarketFeed
 from bots.bot_a import BotA
 from bots.bot_b import BotB
 from bots.bot_c import BotC
+from bots.bot_d import BotD
 from bots.bot_e import BotE
 from execution.redeemer import Redeemer
 from risk.manager import GlobalRiskManager
@@ -55,6 +56,7 @@ class Orchestrator:
             (BotA, BOT_A_ENABLED, "A"),
             (BotB, BOT_B_ENABLED, "B"),
             (BotC, BOT_C_ENABLED, "C"),
+            (BotD, BOT_D_ENABLED, "D"),
             (BotE, BOT_E_ENABLED, "E"),
         ]
         
