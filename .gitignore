@@ -34,3 +34,6 @@ ENV/
 
 #directories
 data/
+
+# Worktrees
+.worktrees/
