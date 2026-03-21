@@ -58,7 +58,8 @@ class ExecutionLayer:
     async def enter(self, direction: str, confidence: float,
                     stake: float, signal_id: int, 
                     token_id: str = None, entry_odds: float = None,
-                    market_id: str = None, win_end: float = None):
+                    market_id: str = None, win_end: float = None,
+                    win_start: float = None):
         
         # Backward compatibility for legacy bots (A/B)
         if not token_id:
@@ -67,11 +68,13 @@ class ExecutionLayer:
                 entry_odds = self.poly.up_odds
                 market_id  = self.poly.market_id
                 win_end    = self.poly.window_end
+                win_start  = self.poly.window_start
             else:
                 token_id   = self.poly.down_token_id
                 entry_odds = self.poly.down_odds
                 market_id  = self.poly.market_id
                 win_end    = self.poly.window_end
+                win_start  = self.poly.window_start
 
         if not entry_odds or not token_id:
             logger.warning("[Bot%s] No odds/token — skipping entry", self.bot_id)
@@ -89,7 +92,8 @@ class ExecutionLayer:
             "signal_id":      signal_id,
             "ts_entry":       datetime.utcnow().isoformat(),
             "market_id":      market_id,
-            "window_start":   None, # Not strictly needed for non-time markets
+            "window_start":   datetime.fromtimestamp(
+                                  win_start).isoformat() if win_start else None,
             "window_end":     datetime.fromtimestamp(
                                   win_end).isoformat() if win_end else None,
             "direction":      direction,

@@ -88,6 +88,9 @@ BOT_B_LAG_DAMPEN = 0.60   # strong penalty when lag contradicts
 ARB_THRESHOLD = 0.985      # Entry when (Yes_Ask + No_Ask) <= 0.985
 BOT_C_MARKET_PATTERN = "*" # Pattern to scan
 
+# ── Bot E thresholds (Momentum) ────────────────────────────────────────────────
+BOT_E_MIN_VELOCITY = 0.015 # Minimum 30s velocity delta to trigger entry
+
 # ── Circuit breaker ────────────────────────────────────────────────────────────
 CIRCUIT_BREAKER_ENABLED = False   # paper mode — flip True for live
 MAX_CONSECUTIVE_LOSSES  = 5

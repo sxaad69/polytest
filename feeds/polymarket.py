@@ -31,7 +31,7 @@ WINDOW_SECONDS = 300   # 5-minute windows
 
 
 import fnmatch
-from utils.pm_math import calculate_vwap
+from utils.pm_math import calculate_vwap, calculate_hedge_price
 
 class PolymarketFeed:
 
@@ -216,11 +216,10 @@ class PolymarketFeed:
             if token_id in self.markets:
                 self.markets[token_id]["bids"] = bids
                 self.markets[token_id]["asks"] = asks
-                # Update legacy book_depth if this is the default market
-                if token_id == self._default_up_id:
-                    self.markets[token_id]["depth"] = sum(
-                        float(b["price"]) * float(b["size"]) for b in bids[:3]
-                    )
+                # Always update depth for any token (not just default)
+                self.markets[token_id]["depth"] = sum(
+                    float(b["price"]) * float(b["size"]) for b in bids[:5]
+                )
         except Exception as e:
             logger.debug("fetch_book error: %s", e)
 
@@ -294,7 +293,7 @@ class PolymarketFeed:
         Called after fetch_market loads new tokens.
         Sends a fresh subscription on the existing WS connection.
         """
-        if self._ws and self.up_token_id and self.down_token_id:
+        if self._ws:
             try:
                 await self._subscribe(self._ws)
             except Exception as e:

@@ -9,8 +9,9 @@ import logging
 import time
 from datetime import datetime
 from config import (
-    BOT_E_BANKROLL, BOT_E_DB_PATH, BOT_E_ENABLED, 
-    MAX_BET_PCT, MIN_ODDS, MAX_ODDS, NO_ENTRY_LAST_SECS
+    BOT_E_BANKROLL, BOT_E_DB_PATH, 
+    MAX_BET_PCT, MIN_ODDS, MAX_ODDS, NO_ENTRY_LAST_SECS,
+    BOT_E_MIN_VELOCITY
 )
 from bots.base_bot import BaseBot
 from signals.signal_e import BotESignal
@@ -25,9 +26,7 @@ class BotE(BaseBot):
 
     def __init__(self, binance, chainlink, poly):
         super().__init__(binance, chainlink, poly)
-        # Use configurable threshold
-        self.min_velocity = 0.015
-        self._signal = BotESignal(min_velocity=self.min_velocity)
+        self._signal = BotESignal(min_velocity=BOT_E_MIN_VELOCITY)
         self.max_concurrent_trades = 3
 
     async def _loop(self):
