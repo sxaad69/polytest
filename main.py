@@ -1,6 +1,6 @@
 """
-Polymarket Dual Bot — Main Orchestrator
-Launches Bot A and Bot B as independent parallel async tasks.
+Polymarket Multi-Bot — Main Orchestrator
+Launches up to 7 bots as independent parallel async tasks.
 Shared feeds, independent decisions, independent databases.
 """
 
@@ -108,10 +108,8 @@ class Orchestrator:
         while self._running:
             if not GlobalRiskManager.check_health(self.bots):
                 logger.critical("GLOBAL HALT TRIGGERED — SHUTTING DOWN")
-                # Trigger clean shutdown by cancelling ourselves
-                for t in asyncio.all_tasks():
-                    if t.get_name() == "main": # or just raise an exception
-                        t.cancel()
+                self._running = False
+                # Trigger clean shutdown by throwing a custom exception or just stopping
                 break
             await asyncio.sleep(10)
 

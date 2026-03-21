@@ -166,8 +166,10 @@ class GlobalRiskManager:
                 logger.critical("GLOBAL CIRCUIT BREAKER: Total loss %.1f%% / Limit %.1f%% | HALTING ALL", 
                               loss_pct*100, config.DAILY_LOSS_LIMIT_PCT*100)
                 for bot in bots_dict.values():
-                    bot.db.update_cb(cb.get('consecutive_losses', 0), 
-                                     cb.get('daily_loss_usdc', 0),
+                    # Correctly fetch and update EACH bot's state
+                    b_cb = bot.db.get_cb()
+                    bot.db.update_cb(b_cb.get('consecutive_losses', 0), 
+                                     b_cb.get('daily_loss_usdc', 0),
                                      halted=True, reason="global_loss_limit")
                 return False
         

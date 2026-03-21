@@ -97,9 +97,10 @@ TRAILING_STOP_DELTA   = 0.20    # kept for reference only — not active
 HARD_STOP_SECONDS     = 60      # increased from 30 — better exit price
 POSITION_POLL_SECS    = 3
 
-# ── Chainlink ──────────────────────────────────────────────────────────────────
-CHAINLINK_RPC_URL   = os.getenv("ALCHEMY_RPC_URL", "")
-CHAINLINK_BTC_FEED  = "0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c"
+# ── RPC Endpoints ──────────────────────────────────────────────────────────────
+CHAINLINK_RPC_URL  = os.getenv("ALCHEMY_RPC_URL", "")  # Ethereum Mainnet
+POLYGON_RPC_URL    = os.getenv("POLYGON_RPC_URL", "https://polygon-mainnet.g.alchemy.com/v2/YOUR_KEY")
+CHAINLINK_BTC_FEED = "0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c"
 CHAINLINK_POLL_SECS = 5
 
 # ── Binance / Coinbase ─────────────────────────────────────────────────────────

@@ -367,13 +367,6 @@ class PolymarketFeed:
                 logger.debug("Poll fallback error: %s", e)
             await asyncio.sleep(3)
 
-    def _update_velocity(self):
-        cutoff  = time.time() - 30
-        history = [(t, p) for t, p in self._odds_history if t >= cutoff]
-        self.odds_velocity = round(
-            history[-1][1] - history[0][1], 4
-        ) if len(history) >= 2 else 0.0
-
     # ── Order placement ────────────────────────────────────────────────────────
 
     async def place_order(self, direction: str, token_id: str,

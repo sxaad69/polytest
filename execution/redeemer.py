@@ -1,6 +1,6 @@
 import logging
 from web3 import Web3
-from config import POLYMARKET_PRIVATE_KEY, CHAINLINK_RPC_URL
+from config import POLYMARKET_PRIVATE_KEY, POLYGON_RPC_URL
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ CTF_ABI = [
 
 class Redeemer:
     def __init__(self, rpc_url: str = None):
-        self.rpc_url = rpc_url or CHAINLINK_RPC_URL
+        self.rpc_url = rpc_url or POLYGON_RPC_URL
         if not self.rpc_url:
             logger.error("No RPC URL provided for Redeemer")
             self.w3 = None
