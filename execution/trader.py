@@ -56,14 +56,22 @@ class ExecutionLayer:
     # ── Entry ──────────────────────────────────────────────────────────────────
 
     async def enter(self, direction: str, confidence: float,
-                    stake: float, signal_id: int):
-        # Long = buy Up shares, Short = buy Down shares
-        if direction == "long":
-            token_id   = self.poly.up_token_id
-            entry_odds = self.poly.up_odds
-        else:
-            token_id   = self.poly.down_token_id
-            entry_odds = self.poly.down_odds
+                    stake: float, signal_id: int, 
+                    token_id: str = None, entry_odds: float = None,
+                    market_id: str = None, win_end: float = None):
+        
+        # Backward compatibility for legacy bots (A/B)
+        if not token_id:
+            if direction == "long":
+                token_id   = self.poly.up_token_id
+                entry_odds = self.poly.up_odds
+                market_id  = self.poly.market_id
+                win_end    = self.poly.window_end
+            else:
+                token_id   = self.poly.down_token_id
+                entry_odds = self.poly.down_odds
+                market_id  = self.poly.market_id
+                win_end    = self.poly.window_end
 
         if not entry_odds or not token_id:
             logger.warning("[Bot%s] No odds/token — skipping entry", self.bot_id)
@@ -80,11 +88,10 @@ class ExecutionLayer:
         trade_id = self.db.log_entry({
             "signal_id":      signal_id,
             "ts_entry":       datetime.utcnow().isoformat(),
-            "market_id":      self.poly.market_id,
-            "window_start":   datetime.fromtimestamp(
-                                  self.poly.window_start).isoformat(),
+            "market_id":      market_id,
+            "window_start":   None, # Not strictly needed for non-time markets
             "window_end":     datetime.fromtimestamp(
-                                  self.poly.window_end).isoformat(),
+                                  win_end).isoformat() if win_end else None,
             "direction":      direction,
             "entry_odds":     filled,
             "stake_usdc":     stake,
@@ -96,10 +103,11 @@ class ExecutionLayer:
             "trade_id":   trade_id,
             "direction":  direction,
             "token_id":   token_id,
+            "market_id":  market_id,
             "entry_odds": filled,
             "peak_odds":  filled,
             "stake_usdc": stake,
-            "window_end": self.poly.window_end,
+            "window_end": win_end,
             "confidence": confidence,
         }
         self.bankroll.reserve(stake)
@@ -126,16 +134,17 @@ class ExecutionLayer:
             await self._evaluate(tid, pos)
 
     async def _evaluate(self, trade_id: int, pos: dict):
-        direction   = pos["direction"]
-        secs_to_end = pos["window_end"] - time.time()
-
-        # Track odds for the direction we bet ON
-        # Long = Up shares, want Up odds to rise
-        # Short = Down shares, want Down odds to rise
-        if direction == "long":
-            current_odds = self.poly.up_odds
+        direction = pos.get("direction")
+        win_end = pos.get("window_end")
+        secs_to_end = (win_end - time.time()) if win_end else 999999
+        
+        # Use the specific market data for this token
+        market = self.poly.markets.get(pos["token_id"])
+        if market:
+            current_odds = market.get("odds")
         else:
-            current_odds = self.poly.down_odds
+            # Fallback for legacy UP/DOWN logic
+            current_odds = self.poly.up_odds if direction == "long" else self.poly.down_odds
 
         if not current_odds:
             return

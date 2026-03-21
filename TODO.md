@@ -29,3 +29,9 @@
 - [x] Step 2: Implement `bots/bot_c.py` (Multi-market monitor)
 - [x] Step 3: Register `BotC` in `Orchestrator`
 - [x] Step 4: Verify discovery and paper mode
+
+# Task 6: Bot E (Momentum) Implementation
+- [x] Step 1: Implement `signals/signal_e.py` (Velocity pulse logic)
+- [x] Step 2: Generalize `ExecutionLayer` for multi-market tokens
+- [x] Step 3: Implement `bots/bot_e.py` (Price trending)
+- [x] Step 4: Register `BotE` and verify
