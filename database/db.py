@@ -135,37 +135,48 @@ class Database:
 
     def _init(self):
         with self._conn() as conn:
+            # 1. Core Schema Application
             conn.executescript(SCHEMA)
             
-            # Migration check for new columns (if table existed without them)
+            # 2. Migration: Ensure circuit_breaker table and row exists 
+            # (In case executescript was bypassed or failed silently on an old DB)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS circuit_breaker (
+                    id                  INTEGER PRIMARY KEY CHECK (id = 1),
+                    consecutive_losses  INTEGER DEFAULT 0,
+                    daily_loss_usdc     REAL DEFAULT 0.0,
+                    halted              INTEGER DEFAULT 0,
+                    halted_reason       TEXT,
+                    last_reset_date     TEXT,
+                    resume_time_ts      REAL DEFAULT 0.0
+                )
+            """)
+            
+            # 3. Migration: Column checks for 'trades'
             existing_cols = [r["name"] for r in conn.execute("PRAGMA table_info(trades)").fetchall()]
-            if "market_condition_id" not in existing_cols:
-                conn.execute("ALTER TABLE trades ADD COLUMN market_condition_id TEXT")
-            if "outcome_index" not in existing_cols:
-                conn.execute("ALTER TABLE trades ADD COLUMN outcome_index INTEGER")
-            if "redeemed" not in existing_cols:
-                conn.execute("ALTER TABLE trades ADD COLUMN redeemed INTEGER DEFAULT 0")
-            if "clob_order_id" not in existing_cols:
-                conn.execute("ALTER TABLE trades ADD COLUMN clob_order_id TEXT")
-            if "token_id" not in existing_cols:
-                conn.execute("ALTER TABLE trades ADD COLUMN token_id TEXT")
-            if "asset" not in existing_cols:
-                conn.execute("ALTER TABLE trades ADD COLUMN asset TEXT")
-            if "slug" not in existing_cols:
-                conn.execute("ALTER TABLE trades ADD COLUMN slug TEXT")
-            if "is_settled" not in existing_cols:
-                conn.execute("ALTER TABLE trades ADD COLUMN is_settled INTEGER DEFAULT 0")
-            if "true_pnl" not in existing_cols:
-                conn.execute("ALTER TABLE trades ADD COLUMN true_pnl REAL")
+            for col in [
+                ("market_condition_id", "TEXT"),
+                ("outcome_index", "INTEGER"),
+                ("redeemed", "INTEGER DEFAULT 0"),
+                ("clob_order_id", "TEXT"),
+                ("token_id", "TEXT"),
+                ("asset", "TEXT"),
+                ("slug", "TEXT"),
+                ("is_settled", "INTEGER DEFAULT 0"),
+                ("true_pnl", "REAL")
+            ]:
+                if col[0] not in existing_cols:
+                    conn.execute(f"ALTER TABLE trades ADD COLUMN {col[0]} {col[1]}")
 
-            # Migration check for circuit_breaker
+            # 4. Migration: Column checks for 'circuit_breaker'
             existing_cb_cols = [r["name"] for r in conn.execute("PRAGMA table_info(circuit_breaker)").fetchall()]
             if "resume_time_ts" not in existing_cb_cols:
                 conn.execute("ALTER TABLE circuit_breaker ADD COLUMN resume_time_ts REAL DEFAULT 0.0")
 
+            # 5. Default State: Insert the anchor row if missing
             conn.execute("""
-                INSERT OR IGNORE INTO circuit_breaker (id, last_reset_date)
-                VALUES (1, ?)
+                INSERT OR IGNORE INTO circuit_breaker (id, last_reset_date, daily_loss_usdc, halted)
+                VALUES (1, ?, 0.0, 0)
             """, (date.today().isoformat(),))
         logger.info("[Bot %s] Database ready at %s", self.bot_id, self.db_path)
 
