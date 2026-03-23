@@ -27,7 +27,8 @@ class BotC(BaseBot):
 
     def __init__(self, binance, chainlink, poly):
         super().__init__(binance, chainlink, poly)
-        self._signal = BotCSignal(arb_threshold=getattr(self, 'ARB_THRESHOLD', 0.985))
+        self._signal = BotCSignal(arb_threshold=ARB_THRESHOLD)
+        self.max_concurrent_trades = 4
         self.processed_markets = {} # condition_id -> win_end
 
     async def _loop(self):
@@ -36,30 +37,63 @@ class BotC(BaseBot):
         
         while self._running:
             try:
-                # Cleanup expired arbs from memory
+                import config
+                import importlib
+                importlib.reload(config)
+                import fnmatch
+                
+                # 1. Define the surgical clinical filter
+                target_markets = {}
+                for tid, m in self.poly.markets.items():
+                    slug = m.get("slug", "").lower()
+                    
+                    # A) Broad Keyword Noise Purge (Price Action, Binary Crypto)
+                    if any(kw in slug for kw in getattr(config, "GLOBAL_EXCLUDE_KEYWORDS", [])):
+                        continue
+                        
+                    # B) Bot C Specific: EXCLUDE Sports (violent separation)
+                    if any(fnmatch.fnmatch(slug, p) for p in getattr(config, "BOT_D_MARKET_PATTERNS", [])):
+                        continue
+                    
+                    # C) Bot C Specific: Global Patterns (usually '*')
+                    is_match = False
+                    for p in getattr(config, "BOT_C_MARKET_PATTERNS", ["*"]):
+                        if fnmatch.fnmatch(slug, p):
+                            is_match = True
+                            break
+                    if is_match:
+                        target_markets[tid] = m
+
+                # 2. Write the .txt log (Title | URL) for the user clinical dashboard
+                if getattr(config, "WRITE_SCANNED_MARKETS_TXT", False):
+                    entries = []
+                    for m in target_markets.values():
+                        s = m.get("slug", "")
+                        es = m.get("event_slug", s)
+                        ss = m.get("series_slug")
+                        url = f"https://polymarket.com/sports/{ss}/{es}" if ss else f"https://polymarket.com/event/{es}"
+                        title = s.replace("-", " ").title()
+                        entries.append(f"{title} | {url}")
+                    
+                    entries = sorted(list(set(entries)))
+                    with open("logs/bot_c_markets.txt", "w") as f:
+                        f.write("\n".join(entries))
+
+                # 3. Cleanup and iterate evaluation
                 now = time.time()
                 self.processed_markets = {cid: end for cid, end in self.processed_markets.items() if end > now}
 
-                # 1. Discover/Update markets (pattern based)
-                # In a real environment, we'd use a specific pattern like 'btc-updown-*' or '*'
-                pattern = "*" # Monitor all discovered
-                await self.poly.fetch_markets_by_pattern(pattern)
-                
-                # 2. Iterate and evaluate
-                for tid, m in list(self.poly.markets.items()):
-                    # Only check if this is the 'primary' side of a pair to avoid double checking
-                    # (Each pair has two tokens, we only need to check the pair once)
+                for tid, m in list(target_markets.items()):
+                    if len(self.executor._positions) >= self.max_concurrent_trades:
+                        break
+                    
                     peer_id = m.get("peer_id")
-                    if not peer_id or tid > peer_id: 
-                        continue
-                        
-                    # Get condition_id for deduplication
-                    cid = m.get("condition_id")
-                    if cid in self.processed_markets:
-                        continue
+                    if not peer_id or tid > peer_id: continue
+                    if m.get("condition_id") in self.processed_markets: continue
 
                     await self._evaluate_market(tid, peer_id, m)
-                    
+                
+                self._log.info("[BotC] 🔍 Scanning %d clinical markets (No Sports/Noise)...", len(target_markets))
             except Exception as e:
                 self._log.error("Bot C loop error: %s", e, exc_info=True)
             

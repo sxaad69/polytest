@@ -11,7 +11,7 @@ from datetime import datetime
 from config import (
     BOT_F_BANKROLL, BOT_F_DB_PATH,
     BOT_F_ACCURACY_THRESHOLD, BOT_F_MIN_SAMPLES,
-    BOT_F_MARKET_PATTERN, NO_ENTRY_LAST_SECS
+    BOT_F_MARKET_PATTERNS, NO_ENTRY_LAST_SECS
 )
 from bots.base_bot import BaseBot
 from signals.signal_f import BotFSignal
@@ -40,14 +40,57 @@ class BotF(BaseBot):
 
         while self._running:
             try:
-                # 1. Refresh slug accuracy stats from our DB
+                import config
+                import importlib
+                importlib.reload(config)
+                import fnmatch
+                
+                # 1. Define the clinical copytrade filter
+                target_markets = {}
+                _sample_slugs = []
+                for tid, m in self.poly.markets.items():
+                    slug = m.get("slug", "").lower()
+                    if len(_sample_slugs) < 10: _sample_slugs.append(slug)
+                    
+                    # A) Broad Keyword Noise Purge (Price Action, Binary Crypto)
+                    if any(kw in slug for kw in getattr(config, "GLOBAL_EXCLUDE_KEYWORDS", [])):
+                        continue
+                    
+                    # B) Bot F Specific: Pattern Match (Financial/Volume)
+                    is_match = False
+                    for p in getattr(config, "BOT_F_MARKET_PATTERNS", []):
+                        if fnmatch.fnmatch(slug, p):
+                            is_match = True
+                            break
+                    if is_match:
+                        target_markets[tid] = m
+
+                # 4. Heartbeat log
+                self._log.info("[BotF] 🔍 Scanning %d filtered markets. Samples: %s", len(target_markets), _sample_slugs[:3])
+
+                # 2. Write the .txt log (Title | URL) for the user dashboard
+                if getattr(config, "WRITE_SCANNED_MARKETS_TXT", False):
+                    entries = []
+                    for m in target_markets.values():
+                        s = m.get("slug", "")
+                        es = m.get("event_slug", s)
+                        ss = m.get("series_slug")
+                        url = f"https://polymarket.com/sports/{ss}/{es}" if ss else f"https://polymarket.com/event/{es}"
+                        font_title = s.replace("-", " ").title()
+                        entries.append(f"{font_title} | {url}")
+                    
+                    entries = sorted(list(set(entries)))
+                    with open("logs/bot_f_markets.txt", "w") as f:
+                        f.write("\n".join(entries))
+
+                # 3. Refresh slug accuracy stats from our DB
                 self._slug_stats = self.db.get_slug_accuracies() or {}
 
-                # 2. Discover markets
-                await self.poly.fetch_markets_by_pattern(BOT_F_MARKET_PATTERN)
-
-                # 3. Evaluate
-                for tid, m in list(self.poly.markets.items()):
+                # 4. Heartbeat log
+                self._log.info("[BotF] 🔍 Scanning %d filtered markets for Copytrade Bias...", len(target_markets))
+                
+                # 5. Evaluate
+                for tid, m in list(target_markets.items()):
                     if len(self.executor._positions) >= self.max_concurrent_trades:
                         break
                     await self._evaluate_market(tid, m)

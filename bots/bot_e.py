@@ -35,18 +35,54 @@ class BotE(BaseBot):
         
         while self._running:
             try:
-                # 1. Discover all active markets
-                pattern = "*" 
-                await self.poly.fetch_markets_by_pattern(pattern)
+                import config
+                import importlib
+                importlib.reload(config)
+                import fnmatch
                 
-                # 2. Iterate and evaluate
-                for tid, m in list(self.poly.markets.items()):
+                # 1. Define the clinical momentum filter
+                target_markets = {}
+                for tid, m in self.poly.markets.items():
+                    slug = m.get("slug", "").lower()
+                    
+                    # A) Broad Keyword Noise Purge (Price Action, Binary Crypto)
+                    if any(kw in slug for kw in getattr(config, "GLOBAL_EXCLUDE_KEYWORDS", [])):
+                        continue
+                    
+                    # B) Bot E Specific: Pattern Match (Geopolitical/Social)
+                    is_match = False
+                    for p in getattr(config, "BOT_E_MARKET_PATTERNS", []):
+                        if fnmatch.fnmatch(slug, p):
+                            is_match = True
+                            break
+                    if is_match:
+                        target_markets[tid] = m
+
+                # 2. Write the .txt log (Title | URL) for the user dashboard
+                if getattr(config, "WRITE_SCANNED_MARKETS_TXT", False):
+                    entries = []
+                    for m in target_markets.values():
+                        s = m.get("slug", "")
+                        es = m.get("event_slug", s)
+                        ss = m.get("series_slug")
+                        url = f"https://polymarket.com/sports/{ss}/{es}" if ss else f"https://polymarket.com/event/{es}"
+                        title = s.replace("-", " ").title()
+                        entries.append(f"{title} | {url}")
+                    
+                    entries = sorted(list(set(entries)))
+                    with open("logs/bot_e_markets.txt", "w") as f:
+                        f.write("\n".join(entries))
+
+                # 3. Heartbeat log
+                self._log.info("[BotE] 🔍 Scanning %d filtered markets for Momentum Pulses...", len(target_markets))
+                
+                # 4. Iterate and evaluate
+                for tid, m in list(target_markets.items()):
                     # Limit number of active positions to avoid over-trading
                     if len(self.executor._positions) >= self.max_concurrent_trades:
                         break
                         
                     await self._evaluate_market(tid, m)
-                    
             except Exception as e:
                 self._log.error("Bot E loop error: %s", e, exc_info=True)
             

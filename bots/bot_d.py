@@ -43,15 +43,56 @@ class BotD(BaseBot):
 
         while self._running:
             try:
-                # 1. Discover sports markets from all configured patterns
-                for pattern in BOT_D_MARKET_PATTERNS:
-                    await self.poly.fetch_markets_by_pattern(pattern)
+                import config
+                import importlib
+                importlib.reload(config)
+                import fnmatch
+                
+                # 1. Define the surgical sports filter
+                target_markets = {}
+                for tid, m in self.poly.markets.items():
+                    slug = m.get("slug", "").lower()
+                    
+                    # A) Broad Keyword Noise Purge (Price Action, Binary Crypto)
+                    if any(kw in slug for kw in getattr(config, "GLOBAL_EXCLUDE_KEYWORDS", [])):
+                        continue
+                        
+                    # B) Bot D Specific: MUST Match Sports Patterns
+                    is_match = False
+                    for p in getattr(config, "BOT_D_MARKET_PATTERNS", []):
+                        if fnmatch.fnmatch(slug, p):
+                            is_match = True
+                            break
+                    
+                    if is_match:
+                        target_markets[tid] = m
 
-                # 2. Scan every registered market for a spike
-                for tid, m in list(self.poly.markets.items()):
+                # 2. Write the .txt log (Title | URL) for the user clinical dashboard
+                if getattr(config, "WRITE_SCANNED_MARKETS_TXT", False):
+                    entries = []
+                    for m in target_markets.values():
+                        s = m.get("slug", "")
+                        es = m.get("event_slug", s)
+                        ss = m.get("series_slug")
+                        
+                        # Use High-Fidelity URL (Native Polymarket structure)
+                        url = f"https://polymarket.com/sports/{ss}/{es}" if ss else f"https://polymarket.com/event/{es}"
+                        
+                        # Format Title (Remove hyphens as requested)
+                        title = s.replace("-", " ").title()
+                        entries.append(f"{title} | {url}")
+                    
+                    entries = sorted(list(set(entries)))
+                    with open("logs/bot_d_markets.txt", "w") as f:
+                        f.write("\n".join(entries))
+
+                # 3. Scan filtered markets
+                for tid, m in list(target_markets.items()):
                     if len(self.executor._positions) >= self.max_concurrent_trades:
                         break
                     await self._evaluate_market(tid, m)
+                
+                self._log.info("[BotD] 🔍 Scanning %d clinical sports markets...", len(target_markets))
 
             except Exception as e:
                 self._log.error("Bot D loop error: %s", e, exc_info=True)

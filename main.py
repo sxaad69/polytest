@@ -8,6 +8,7 @@ import asyncio
 import logging
 import signal
 import sys
+import time
 from config import (
     PAPER_TRADING, LIVE_CONFLICT_RULE, LOG_LEVEL, 
     BOT_A_ENABLED, BOT_B_ENABLED, BOT_C_ENABLED, BOT_D_ENABLED, 
@@ -29,10 +30,28 @@ from execution.redeemer import Redeemer
 from risk.manager import GlobalRiskManager
 from analytics.comparison import print_comparison
 
+import os
+from logging.handlers import RotatingFileHandler
+
+os.makedirs("logs", exist_ok=True)
+
+# Global Formatter for both Console and Error files
+log_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+# 1. Console Handler (Standard Output)
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(log_formatter)
+
+# 2. Dedicated Error File Handler (Rotates at 10MB to prevent disk overflow)
+error_file_handler = RotatingFileHandler("logs/errors.log", maxBytes=10*1024*1024, backupCount=5)
+error_file_handler.setLevel(logging.ERROR)
+error_file_handler.setFormatter(
+    logging.Formatter("%(asctime)s [%(levelname)s] %(name)s [Line: %(lineno)d] %(funcName)s():\n%(message)s\n")
+)
+
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
+    handlers=[console_handler, error_file_handler],
 )
 logger = logging.getLogger(__name__)
 
@@ -89,8 +108,9 @@ class Orchestrator:
                 if hasattr(bot, "executor") and bot.executor:
                     bot.executor.global_risk = self.global_risk
 
-            # First seed the shared registry
-            await self.poly.refresh_all_markets()
+            # First seed only the CURRENT active windows
+            ts_now = int(time.time() // 300) * 300
+            await self.poly.refresh_all_markets(pattern=f"*-updown-*-{ts_now}")
 
             tasks = [
                 asyncio.create_task(self.binance.start(),          name="binance_ws"),
@@ -128,11 +148,35 @@ class Orchestrator:
         logger.info("Global risk monitor active")
         while self._running:
             if self.global_risk and not self.global_risk.check_health():
+                if getattr(self.global_risk, "needs_liquidation", False):
+                    await self._liquidate_portfolio()
+                    
                 logger.critical("GLOBAL HALT TRIGGERED — SHUTTING DOWN")
                 self._running = False
                 # Trigger clean shutdown by throwing a custom exception or just stopping
                 break
             await asyncio.sleep(10)
+
+    async def _liquidate_portfolio(self):
+        """Emergency market sell of all open positions to secure unrealized profit."""
+        logger.critical("STARTING PORTFOLIO LIQUIDATION SEQUENCE...")
+        tasks = []
+        reason = getattr(self.global_risk, "liquidation_reason", "unrealized_profit_lock")
+        
+        for bid, bot in self.bots.items():
+            if hasattr(bot, "executor") and bot.executor:
+                for tid, pos in list(bot.executor._positions.items()):
+                    m = bot.poly.markets.get(pos.get("token_id")) if hasattr(bot, "poly") else None
+                    current_odds = m.get("odds") if m else pos.get("entry_odds")
+                    logger.warning("[Bot %s] Panic liquidating %s at %.3f", bid, str(tid)[:8], current_odds)
+                    # We pass the reason so the database explicitly knows why it closed
+                    tasks.append(bot.executor._exit(tid, pos, current_odds, reason))
+                    
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+            logger.critical("LIQUIDATION COMPLETE. ALL SECURE.")
+        else:
+            logger.critical("LIQUIDATION COMPLETE. NO POSITIONS CONFLICTED.")
 
     async def _conflict_monitor(self):
         """Live mode only: monitors for both bots signalling same window."""

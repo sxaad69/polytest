@@ -74,6 +74,24 @@ class BaseBot:
         _tick_count = 0
         while self._running:
             try:
+                import config
+                import importlib
+                importlib.reload(config)
+                
+                # Clinical Report: Write target market to .txt (Title | URL)
+                if getattr(config, "WRITE_SCANNED_MARKETS_TXT", False):
+                    mid = getattr(self.poly, "market_id", None)
+                    if mid:
+                        s = getattr(self.poly, "slug", str(mid))
+                        es = getattr(self.poly, "event_slug", s)
+                        ss = getattr(self.poly, "series_slug", None)
+                        
+                        url = f"https://polymarket.com/sports/{ss}/{es}" if ss else f"https://polymarket.com/event/{es}"
+                        title = s.replace("-", " ").title()
+                        
+                        with open(f"logs/bot_{self.BOT_ID.lower()}_markets.txt", "w") as f:
+                            f.write(f"{title} | {url}")
+
                 await self._tick()
                 _tick_count += 1
                 # Heartbeat every 60 seconds (every 6 ticks at 10s interval)
@@ -132,11 +150,6 @@ class BaseBot:
     async def _tick(self):
         # Fetch new market when none loaded or current window is expiring
         if not self.poly.market_id or self.poly.seconds_remaining < 15:
-            self.poly.market_id    = None
-            self.poly.up_token_id  = None
-            self.poly.down_token_id = None
-            self.poly.up_odds      = None
-            self.poly.down_odds    = None
             await self.poly.fetch_market()
             return
 

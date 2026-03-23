@@ -42,8 +42,8 @@ CREATE TABLE IF NOT EXISTS trades (
     ts_entry        TEXT NOT NULL,
     ts_exit         TEXT,
     market_id       TEXT NOT NULL,
-    window_start    TEXT NOT NULL,
-    window_end      TEXT NOT NULL,
+    window_start    TEXT,
+    window_end      TEXT,
     direction       TEXT NOT NULL,
     entry_odds      REAL NOT NULL,
     exit_odds       REAL,
@@ -61,7 +61,21 @@ CREATE TABLE IF NOT EXISTS trades (
     redeemed            INTEGER DEFAULT 0,
     resolved            INTEGER DEFAULT 0,
     clob_order_id       TEXT,
-    token_id            TEXT
+    token_id            TEXT,
+    asset               TEXT,   -- e.g. BTC, ETH, SOL — for per-asset performance analysis
+    slug                TEXT,   -- e.g. btc-updown-5m-1774134000 — exact market targeted
+    is_settled          INTEGER DEFAULT 0,
+    true_pnl            REAL
+);
+
+CREATE TABLE IF NOT EXISTS settlements (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_id            INTEGER REFERENCES trades(id),
+    clob_order_id       TEXT,
+    tx_hash             TEXT,
+    usdc_returned       REAL NOT NULL,
+    slippage_bps        INTEGER,
+    settled_at          TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS skipped (
@@ -81,7 +95,8 @@ CREATE TABLE IF NOT EXISTS circuit_breaker (
     daily_loss_usdc     REAL DEFAULT 0.0,
     halted              INTEGER DEFAULT 0,
     halted_reason       TEXT,
-    last_reset_date     TEXT
+    last_reset_date     TEXT,
+    resume_time_ts      REAL DEFAULT 0.0
 );
 
 CREATE TABLE IF NOT EXISTS chainlink_lag_events (
@@ -134,12 +149,49 @@ class Database:
                 conn.execute("ALTER TABLE trades ADD COLUMN clob_order_id TEXT")
             if "token_id" not in existing_cols:
                 conn.execute("ALTER TABLE trades ADD COLUMN token_id TEXT")
+            if "asset" not in existing_cols:
+                conn.execute("ALTER TABLE trades ADD COLUMN asset TEXT")
+            if "slug" not in existing_cols:
+                conn.execute("ALTER TABLE trades ADD COLUMN slug TEXT")
+            if "is_settled" not in existing_cols:
+                conn.execute("ALTER TABLE trades ADD COLUMN is_settled INTEGER DEFAULT 0")
+            if "true_pnl" not in existing_cols:
+                conn.execute("ALTER TABLE trades ADD COLUMN true_pnl REAL")
+
+            # Migration check for circuit_breaker
+            existing_cb_cols = [r["name"] for r in conn.execute("PRAGMA table_info(circuit_breaker)").fetchall()]
+            if "resume_time_ts" not in existing_cb_cols:
+                conn.execute("ALTER TABLE circuit_breaker ADD COLUMN resume_time_ts REAL DEFAULT 0.0")
 
             conn.execute("""
                 INSERT OR IGNORE INTO circuit_breaker (id, last_reset_date)
                 VALUES (1, ?)
             """, (date.today().isoformat(),))
         logger.info("[Bot %s] Database ready at %s", self.bot_id, self.db_path)
+
+    def log_settlement(self, trade_id: int, clob_order_id: str, tx_hash: str, 
+                       usdc_returned: float, slippage_bps: int = 0):
+        """Records the absolute USDC truth return from Polymarket."""
+        with self._conn() as conn:
+            conn.execute("""
+                INSERT INTO settlements (trade_id, clob_order_id, tx_hash, usdc_returned, slippage_bps, settled_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (trade_id, clob_order_id, tx_hash, usdc_returned, slippage_bps, datetime.utcnow().isoformat()))
+            
+            # Update the parent trade record
+            conn.execute("""
+                UPDATE trades SET 
+                    is_settled = 1,
+                    true_pnl = ?
+                WHERE id = ?
+            """, (usdc_returned, trade_id))
+
+    def open_trades(self) -> list:
+        """Fetch all unresolved trades to reload them into the bot after a crash."""
+        with self._conn() as conn:
+            return [dict(r) for r in conn.execute(
+                "SELECT * FROM trades WHERE resolved = 0"
+            ).fetchall()]
 
     @contextmanager
     def _conn(self):
@@ -186,21 +238,23 @@ class Database:
                     entry_odds, peak_odds, stake_usdc,
                     taker_fee_bps, chainlink_open,
                     market_condition_id, outcome_index,
-                    clob_order_id, token_id
+                    clob_order_id, token_id, asset, slug
                 ) VALUES (
                     :signal_id, :bot, :ts_entry, :market_id,
                     :window_start, :window_end, :direction,
                     :entry_odds, :entry_odds, :stake_usdc,
                     :taker_fee_bps, :chainlink_open,
                     :market_condition_id, :outcome_index,
-                    :clob_order_id, :token_id
+                    :clob_order_id, :token_id, :asset, :slug
                 )
             """, {**t, "bot": self.bot_id,
                   "taker_fee_bps": t.get("taker_fee_bps", 0),
                   "market_condition_id": t.get("market_condition_id"),
                   "outcome_index": t.get("outcome_index"),
                   "clob_order_id": t.get("clob_order_id"),
-                  "token_id": t.get("token_id")})
+                  "token_id": t.get("token_id"),
+                  "asset": t.get("asset"),
+                  "slug": t.get("slug")})
             return cur.lastrowid
 
     def log_exit(self, trade_id: int, e: dict) -> tuple:
@@ -277,21 +331,21 @@ class Database:
             ).fetchone())
 
     def update_cb(self, losses: int, daily_loss: float,
-                  halted=False, reason=None):
+                  halted=False, reason=None, resume_time_ts=0.0):
         with self._conn() as conn:
             conn.execute("""
                 UPDATE circuit_breaker SET
                     consecutive_losses=?, daily_loss_usdc=?,
-                    halted=?, halted_reason=?
+                    halted=?, halted_reason=?, resume_time_ts=?
                 WHERE id=1
-            """, (losses, daily_loss, int(halted), reason))
+            """, (losses, daily_loss, int(halted), reason, resume_time_ts))
 
     def reset_cb(self):
         with self._conn() as conn:
             conn.execute("""
                 UPDATE circuit_breaker SET
                     consecutive_losses=0, daily_loss_usdc=0.0,
-                    halted=0, halted_reason=NULL, last_reset_date=?
+                    halted=0, halted_reason=NULL, last_reset_date=?, resume_time_ts=0.0
                 WHERE id=1
             """, (date.today().isoformat(),))
 
