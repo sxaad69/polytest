@@ -32,10 +32,20 @@ class PreTradeFilters:
             self._circuit_breaker(db),
             self._global_exposure(global_risk, stake),
         ]
-        for passed, reason in checks:
-            if not passed:
-                db.log_skip(reason, confidence, odds, market_id)
-                return False, reason
+        for check_result in checks:
+            try:
+                # Defensive check for non-tuple returns or incorrect lengths
+                if isinstance(check_result, tuple) and len(check_result) >= 2:
+                    passed, reason = check_result[0], check_result[1]
+                else:
+                    passed, reason = True, "invalid_check_return"
+                
+                if not passed:
+                    db.log_skip(reason, confidence, odds, market_id)
+                    return False, reason
+            except Exception as e:
+                logger.error("Filter check iteration error: %s", e)
+                continue
         return True, "all_clear"
 
     def _confidence(self, score: float) -> tuple:

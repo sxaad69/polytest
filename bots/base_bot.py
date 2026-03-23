@@ -173,6 +173,12 @@ class BaseBot:
         trade_odds = (self.poly.up_odds if result.direction == "long"
                       else self.poly.down_odds)
 
+        # 1. Calculate stake BEFORE filter check (required for GlobalRiskManager exposure limits)
+        stake = self.sizer.calculate(result.score, trade_odds, self.bankroll.available)
+        if stake <= 0:
+            return
+
+        # 2. Run filters (now with STAKE and GLOBAL_RISK context)
         passed, reason = self.filters.check(
             db             = self.db,
             confidence     = result.score,
@@ -180,6 +186,8 @@ class BaseBot:
             depth          = self.poly.book_depth,
             secs_remaining = self.poly.seconds_remaining,
             market_id      = self.poly.market_id,
+            stake          = stake,
+            global_risk    = getattr(self.executor, "global_risk", None)
         )
 
         signal_id = self._log_signal(result, trade_odds, passed, reason)
@@ -187,10 +195,6 @@ class BaseBot:
         if not passed or not result.tradeable:
             self._log.debug("[Bot%s] skip | reason=%s score=%.3f",
                             self.BOT_ID, reason, result.score)
-            return
-
-        stake = self.sizer.calculate(result.score, trade_odds, self.bankroll.available)
-        if stake <= 0:
             return
 
         self._log.info("[Bot%s] SIGNAL | dir=%s score=%.3f odds=%.3f stake=%.2f",
